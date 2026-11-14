@@ -889,30 +889,38 @@ local menu = (function()
     -- ScreenGui & root frames
     ----------------------------------------------------------------------
     local gui = mk("ScreenGui", {
-        Name = "ToshibaUI_Juju",
+        Name = "ToshibaUI",
         ResetOnSpawn = false,
-        DisplayOrder = 9999,
+        IgnoreGuiInset = true,
+        DisplayOrder = 1000,
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-    }, guiParent())
+    }, nil)
+    pcall(function()
+        if syn and syn.protect_gui then
+            syn.protect_gui(gui)
+        end
+    end)
+    gui.Parent = guiParent()
 
     local blurFx = mk("BlurEffect", { Name = "ToshibaBlur", Size = 0 }, Lighting)
 
-    local uiScale = mk("UIScale", { Scale = 1 }, gui)
-
     local holder = mk("Frame", {
-        Name = "WindowHolder",
+        Name = "Holder",
         BackgroundTransparency = 1,
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.fromScale(0.5, 0.5),
         Size = UDim2.fromOffset(WIN_W, WIN_H),
     }, gui)
 
-    -- drop shadow
-    local shadow = mk("Frame", { Name = "Shadow", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1) }, holder)
-    for _, e in ipairs({ 6, 12, 20 }) do
+    local uiScale = mk("UIScale", { Scale = 0.5 }, holder)
+
+    -- drop shadow (multi-layer smooth fake shadow)
+    local shadow = mk("Frame", { Name = "Shadow", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 1 }, holder)
+    for i = 1, 8 do
+        local e = i * 7
         local f = mk("Frame", {
             BackgroundColor3 = Color3.new(0, 0, 0),
-            BackgroundTransparency = 0.88,
+            BackgroundTransparency = 0.955,
             BorderSizePixel = 0,
             AnchorPoint = Vector2.new(0.5, 0.5),
             Position = UDim2.new(0.5, 0, 0.5, 10),
@@ -2151,7 +2159,7 @@ local menu = (function()
             end, COL.box)
         end
 
-        addSliderCard("Scale", 60, 110, 100, 1, function(v) return v .. "%" end, function(v)
+        addSliderCard("Scale", 50, 150, 100, 1, function(v) return v .. "%" end, function(v)
             CFG.Scale = v / 100
             applyScale()
         end)
@@ -2560,6 +2568,11 @@ local menu = (function()
                 local elObj = {
                     name = elName,
                     visible = true,
+                    card = nil,
+                    cardHandle = nil,
+                    sliderApi = nil,
+                    dropdownApi = nil,
+                    textboxApi = nil,
                     on_toggle_change = signal["new"](),
                     on_slider_change = signal["new"](),
                     on_dropdown_change = signal["new"](),
@@ -2584,153 +2597,7 @@ local menu = (function()
                         end,
                     })
                     elObj.cardHandle = cardHandle
-
-                    function elObj:set_toggle(val)
-                        flags[p.flag] = val and true or false
-                        cardHandle.sw.Set(flags[p.flag], true)
-                        elObj.on_toggle_change:Fire(flags[p.flag])
-                    end
-
-                    function elObj:create_settings(count)
-                        cardHandle.enableSettings()
-                        local setObj = { elements = {} }
-                        function setObj:create_element(sInfo, sProps)
-                            sProps = sProps or {}
-                            local sName = sInfo.name or sInfo.text or "sub"
-                            local subEl = {
-                                name = sName,
-                                on_toggle_change = signal["new"](),
-                                on_slider_change = signal["new"](),
-                                on_dropdown_change = signal["new"](),
-                                on_color_change = signal["new"](),
-                                on_clicked = signal["new"](),
-                            }
-                            registered_elements[#registered_elements + 1] = subEl
-
-                            if sProps.slider then
-                                local sp = sProps.slider
-                                subEl.slider_flag = sp.flag
-                                flags[sp.flag] = sp.default or sp.min or 0
-                                local sl = cardHandle.addSettingRow("slider", sName, {
-                                    min = sp.min or 0,
-                                    max = sp.max or 100,
-                                    default = flags[sp.flag],
-                                    step = sp.step or (sp.decimals and 10^(-sp.decimals)) or 1,
-                                    onChange = function(v)
-                                        flags[sp.flag] = v
-                                        subEl.on_slider_change:Fire(v)
-                                    end,
-                                })
-                                function subEl:set_slider(v)
-                                    flags[sp.flag] = v
-                                    if sl then sl.Set(v, true) end
-                                    subEl.on_slider_change:Fire(v)
-                                end
-                            elseif sProps.toggle then
-                                local tp = sProps.toggle
-                                subEl.toggle_flag = tp.flag
-                                flags[tp.flag] = tp.default and true or false
-                                local tsw = cardHandle.addSettingRow("toggle", sName, {
-                                    default = flags[tp.flag],
-                                    onChange = function(v)
-                                        flags[tp.flag] = v
-                                        subEl.on_toggle_change:Fire(v)
-                                    end,
-                                })
-                                function subEl:set_toggle(v)
-                                    flags[tp.flag] = v and true or false
-                                    if tsw then tsw.Set(v, true) end
-                                    subEl.on_toggle_change:Fire(flags[tp.flag])
-                                end
-                            elseif sProps.dropdown then
-                                local dp = sProps.dropdown
-                                subEl.dropdown_flag = dp.flag
-                                flags[dp.flag] = dp.default or (dp.options and dp.options[1]) or ""
-                                local dd = cardHandle.addSettingRow("dropdown", sName, {
-                                    options = dp.options or {},
-                                    default = flags[dp.flag],
-                                    multi = dp.multi,
-                                    onChange = function(v)
-                                        flags[dp.flag] = v
-                                        subEl.on_dropdown_change:Fire(v)
-                                    end,
-                                })
-                                function subEl:set_dropdown(v)
-                                    flags[dp.flag] = v
-                                    if dd then dd.Set(v, true) end
-                                    subEl.on_dropdown_change:Fire(v)
-                                end
-                            elseif sProps.colorpicker then
-                                local cp = sProps.colorpicker
-                                subEl.color_flag = cp.flag
-                                subEl.transparency_flag = cp.transparency_flag
-                                flags[cp.flag] = cp.default or Color3.new(1, 1, 1)
-                                if cp.transparency_flag then
-                                    flags[cp.transparency_flag] = cp.default_transparency or 0
-                                end
-                                local colPick = cardHandle.addSettingRow("colorpicker", sName, {
-                                    default = flags[cp.flag],
-                                    defaultAlpha = cp.transparency_flag and flags[cp.transparency_flag] or 0,
-                                    onChange = function(c, a)
-                                        flags[cp.flag] = c
-                                        if cp.transparency_flag then flags[cp.transparency_flag] = a end
-                                        subEl.on_color_change:Fire(c)
-                                    end,
-                                })
-                                function subEl:set_colorpicker(c)
-                                    flags[cp.flag] = c
-                                    if colPick then colPick.Set(c, nil, true) end
-                                    subEl.on_color_change:Fire(c)
-                                end
-                                function subEl:set_colorpicker_transparency(a)
-                                    if cp.transparency_flag then flags[cp.transparency_flag] = a end
-                                    if colPick then colPick.Set(nil, a, true) end
-                                end
-                            elseif sProps.keybind then
-                                local kp = sProps.keybind
-                                subEl.keybind_flag = kp.flag
-                                flags[kp.flag] = kp.default or Enum.KeyCode.Unknown
-                                local kb = cardHandle.addSettingRow("keybind", sName, {
-                                    default = flags[kp.flag],
-                                    onChange = function(k)
-                                        flags[kp.flag] = k
-                                    end,
-                                })
-                                function subEl:set_key(k)
-                                    flags[kp.flag] = k
-                                    if kb then kb.Set(k, true) end
-                                end
-                            elseif sProps.textbox then
-                                local tbp = sProps.textbox
-                                subEl.textbox_flag = tbp.flag
-                                flags[tbp.flag] = tbp.default or ""
-                                local tb = cardHandle.addSettingRow("textbox", sName, {
-                                    default = flags[tbp.flag],
-                                    placeholder = tbp.placeholder,
-                                    onChange = function(t)
-                                        flags[tbp.flag] = t
-                                    end,
-                                })
-                                function subEl:set_textbox(t)
-                                    flags[tbp.flag] = t
-                                    if tb then tb.Set(t, true) end
-                                end
-                            elseif sProps.button then
-                                local bp = sProps.button
-                                cardHandle.addSettingRow("button", sName, {
-                                    confirmation = bp.confirmation,
-                                    onClick = function()
-                                        subEl.on_clicked:Fire()
-                                        if bp.callback then bp.callback() end
-                                    end,
-                                })
-                            end
-
-                            function subEl:set_visible(v) end
-                            return subEl
-                        end
-                        return setObj
-                    end
+                    elObj.card = cardHandle.card
 
                 elseif properties.slider then
                     local sp = properties.slider
@@ -2745,6 +2612,8 @@ local menu = (function()
                     }, targetCol)
                     corner(card, 22, true)
                     glassify(card, 1)
+                    elObj.card = card
+
                     lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(150, 70))
                     local val = lbl(card, tostring(flags[sp.flag]), 16, COL.value, UDim2.fromOffset(340, 0), UDim2.fromOffset(50, 70), { align = Enum.TextXAlignment.Right })
                     local sl = makeSlider(card, 180, 35, 150, sp.min or 0, sp.max or 100, flags[sp.flag], sp.step or 1, function(v)
@@ -2752,13 +2621,7 @@ local menu = (function()
                         flags[sp.flag] = v
                         elObj.on_slider_change:Fire(v)
                     end, COL.box)
-
-                    function elObj:set_slider(v)
-                        flags[sp.flag] = v
-                        val.Text = string.format("%.1f", v)
-                        sl.Set(v, true)
-                        elObj.on_slider_change:Fire(v)
-                    end
+                    elObj.sliderApi = sl
 
                 elseif properties.dropdown then
                     local dp = properties.dropdown
@@ -2773,18 +2636,15 @@ local menu = (function()
                     }, targetCol)
                     corner(card, 22, true)
                     glassify(card, 1)
+                    elObj.card = card
+
                     lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
 
                     local dd = makeDropdown(card, UDim2.fromOffset(230, 17), 168, dp.options or {}, flags[dp.flag], dp.multi, function(v)
                         flags[dp.flag] = v
                         elObj.on_dropdown_change:Fire(v)
                     end)
-
-                    function elObj:set_dropdown(v)
-                        flags[dp.flag] = v
-                        dd.Set(v, true)
-                        elObj.on_dropdown_change:Fire(v)
-                    end
+                    elObj.dropdownApi = dd
 
                 elseif properties.button then
                     local bp = properties.button
@@ -2796,6 +2656,8 @@ local menu = (function()
                     }, targetCol)
                     corner(card, 22, true)
                     glassify(card, 1)
+                    elObj.card = card
+
                     lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(240, 70))
                     makeButton(card, UDim2.fromOffset(270, 17), 125, "Execute", bp.confirmation, function()
                         elObj.on_clicked:Fire()
@@ -2815,14 +2677,13 @@ local menu = (function()
                     }, targetCol)
                     corner(card, 22, true)
                     glassify(card, 1)
+                    elObj.card = card
+
                     lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
                     local tb = makeTextbox(card, UDim2.fromOffset(220, 18), 178, flags[tbp.flag], tbp.placeholder, function(t)
                         flags[tbp.flag] = t
                     end)
-                    function elObj:set_textbox(t)
-                        flags[tbp.flag] = t
-                        tb.Set(t, true)
-                    end
+                    elObj.textboxApi = tb
 
                 elseif properties.info then
                     local card = mk("Frame", {
@@ -2833,23 +2694,237 @@ local menu = (function()
                     }, targetCol)
                     corner(card, 22, true)
                     glassify(card, 1)
+                    elObj.card = card
+
                     local lTitle = lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
                     local lVal = lbl(card, "", 16, COL.value, UDim2.fromOffset(200, 0), UDim2.fromOffset(190, 70), { align = Enum.TextXAlignment.Right })
                     function elObj:set_info(prop, val)
                         if prop == "Text" then lVal.Text = tostring(val)
                         elseif prop == "Color" then lVal.TextColor3 = val end
                     end
+                else
+                    -- Empty properties {} or unrecognized: expandable group card
+                    local cardHandle = makeCard(targetCol, elName, {
+                        arrow = true,
+                        desc = info.desc or elName,
+                    })
+                    elObj.cardHandle = cardHandle
+                    elObj.card = cardHandle.card
+                end
+
+                function elObj:set_toggle(val)
+                    if elObj.toggle_flag then
+                        flags[elObj.toggle_flag] = val and true or false
+                    end
+                    if elObj.cardHandle and elObj.cardHandle.sw then
+                        elObj.cardHandle.sw.Set(val and true or false, true)
+                    end
+                    elObj.on_toggle_change:Fire(val and true or false)
+                end
+
+                function elObj:set_slider(v)
+                    if elObj.slider_flag then
+                        flags[elObj.slider_flag] = v
+                    end
+                    if elObj.sliderApi then
+                        elObj.sliderApi.Set(v, true)
+                    end
+                    elObj.on_slider_change:Fire(v)
+                end
+
+                function elObj:set_dropdown(v)
+                    if elObj.dropdown_flag then
+                        flags[elObj.dropdown_flag] = v
+                    end
+                    if elObj.dropdownApi then
+                        elObj.dropdownApi.Set(v, true)
+                    end
+                    elObj.on_dropdown_change:Fire(v)
+                end
+
+                function elObj:set_textbox(t)
+                    if elObj.textbox_flag then
+                        flags[elObj.textbox_flag] = t
+                    end
+                    if elObj.textboxApi then
+                        elObj.textboxApi.Set(t, true)
+                    end
+                end
+
+                function elObj:create_settings(count)
+                    if elObj.cardHandle then
+                        elObj.cardHandle.enableSettings()
+                    end
+                    local setObj = { elements = {} }
+                    function setObj:create_element(sInfo, sProps)
+                        sProps = sProps or {}
+                        local sName = sInfo.name or sInfo.text or "sub"
+                        local subEl = {
+                            name = sName,
+                            on_toggle_change = signal["new"](),
+                            on_slider_change = signal["new"](),
+                            on_dropdown_change = signal["new"](),
+                            on_color_change = signal["new"](),
+                            on_clicked = signal["new"](),
+                        }
+                        registered_elements[#registered_elements + 1] = subEl
+                        setObj.elements[#setObj.elements + 1] = subEl
+
+                        if sProps.slider then
+                            local sp = sProps.slider
+                            subEl.slider_flag = sp.flag
+                            flags[sp.flag] = sp.default or sp.min or 0
+                            local sl
+                            if elObj.cardHandle then
+                                sl = elObj.cardHandle.addSettingRow("slider", sName, {
+                                    min = sp.min or 0,
+                                    max = sp.max or 100,
+                                    default = flags[sp.flag],
+                                    step = sp.step or (sp.decimals and 10^(-sp.decimals)) or 1,
+                                    onChange = function(v)
+                                        flags[sp.flag] = v
+                                        subEl.on_slider_change:Fire(v)
+                                    end,
+                                })
+                            end
+                            function subEl:set_slider(v)
+                                flags[sp.flag] = v
+                                if sl then sl.Set(v, true) end
+                                subEl.on_slider_change:Fire(v)
+                            end
+                        elseif sProps.toggle then
+                            local tp = sProps.toggle
+                            subEl.toggle_flag = tp.flag
+                            flags[tp.flag] = tp.default and true or false
+                            local tsw
+                            if elObj.cardHandle then
+                                tsw = elObj.cardHandle.addSettingRow("toggle", sName, {
+                                    default = flags[tp.flag],
+                                    onChange = function(v)
+                                        flags[tp.flag] = v
+                                        subEl.on_toggle_change:Fire(v)
+                                    end,
+                                })
+                            end
+                            function subEl:set_toggle(v)
+                                flags[tp.flag] = v and true or false
+                                if tsw then tsw.Set(v, true) end
+                                subEl.on_toggle_change:Fire(flags[tp.flag])
+                            end
+                        elseif sProps.dropdown then
+                            local dp = sProps.dropdown
+                            subEl.dropdown_flag = dp.flag
+                            flags[dp.flag] = dp.default or (dp.options and dp.options[1]) or ""
+                            local dd
+                            if elObj.cardHandle then
+                                dd = elObj.cardHandle.addSettingRow("dropdown", sName, {
+                                    options = dp.options or {},
+                                    default = flags[dp.flag],
+                                    multi = dp.multi,
+                                    onChange = function(v)
+                                        flags[dp.flag] = v
+                                        subEl.on_dropdown_change:Fire(v)
+                                    end,
+                                })
+                            end
+                            function subEl:set_dropdown(v)
+                                flags[dp.flag] = v
+                                if dd then dd.Set(v, true) end
+                                subEl.on_dropdown_change:Fire(v)
+                            end
+                        elseif sProps.colorpicker then
+                            local cp = sProps.colorpicker
+                            subEl.color_flag = cp.flag
+                            subEl.transparency_flag = cp.transparency_flag
+                            flags[cp.flag] = cp.default or Color3.new(1, 1, 1)
+                            if cp.transparency_flag then
+                                flags[cp.transparency_flag] = cp.default_transparency or 0
+                            end
+                            local colPick
+                            if elObj.cardHandle then
+                                colPick = elObj.cardHandle.addSettingRow("colorpicker", sName, {
+                                    default = flags[cp.flag],
+                                    defaultAlpha = cp.transparency_flag and flags[cp.transparency_flag] or 0,
+                                    onChange = function(c, a)
+                                        flags[cp.flag] = c
+                                        if cp.transparency_flag then flags[cp.transparency_flag] = a end
+                                        subEl.on_color_change:Fire(c)
+                                    end,
+                                })
+                            end
+                            function subEl:set_colorpicker(c)
+                                flags[cp.flag] = c
+                                if colPick then colPick.Set(c, nil, true) end
+                                subEl.on_color_change:Fire(c)
+                            end
+                            function subEl:set_colorpicker_transparency(a)
+                                if cp.transparency_flag then flags[cp.transparency_flag] = a end
+                                if colPick then colPick.Set(nil, a, true) end
+                            end
+                        elseif sProps.keybind then
+                            local kp = sProps.keybind
+                            subEl.keybind_flag = kp.flag
+                            flags[kp.flag] = kp.default or Enum.KeyCode.Unknown
+                            local kb
+                            if elObj.cardHandle then
+                                kb = elObj.cardHandle.addSettingRow("keybind", sName, {
+                                    default = flags[kp.flag],
+                                    onChange = function(k)
+                                        flags[kp.flag] = k
+                                    end,
+                                })
+                            end
+                            function subEl:set_key(k)
+                                flags[kp.flag] = k
+                                if kb then kb.Set(k, true) end
+                            end
+                        elseif sProps.textbox then
+                            local tbp = sProps.textbox
+                            subEl.textbox_flag = tbp.flag
+                            flags[tbp.flag] = tbp.default or ""
+                            local tb
+                            if elObj.cardHandle then
+                                tb = elObj.cardHandle.addSettingRow("textbox", sName, {
+                                    default = flags[tbp.flag],
+                                    placeholder = tbp.placeholder,
+                                    onChange = function(t)
+                                        flags[tbp.flag] = t
+                                    end,
+                                })
+                            end
+                            function subEl:set_textbox(t)
+                                flags[tbp.flag] = t
+                                if tb then tb.Set(t, true) end
+                            end
+                        elseif sProps.button then
+                            local bp = sProps.button
+                            if elObj.cardHandle then
+                                elObj.cardHandle.addSettingRow("button", sName, {
+                                    confirmation = bp.confirmation,
+                                    onClick = function()
+                                        subEl.on_clicked:Fire()
+                                        if bp.callback then bp.callback() end
+                                    end,
+                                })
+                            end
+                        end
+
+                        function subEl:set_visible(v) end
+                        return subEl
+                    end
+                    return setObj
                 end
 
                 function elObj:set_visible(v)
                     if elObj.cardHandle and elObj.cardHandle.card then
                         elObj.cardHandle.card.Visible = v
+                    elseif elObj.card then
+                        elObj.card.Visible = v
                     end
                 end
 
                 return elObj
             end
-
             function secObj:recalculate_size() end
             function secObj:destroy() end
             return secObj
@@ -3206,12 +3281,29 @@ new_notification = menu["new_notification"]
 local real_drawing = getgenv()["Drawing"] or Drawing
 local fake_drawing = getgenv()["fake_drawing"] or Drawing
 
-local event = replicated_storage["MainEvent"]
-local clone = workspace["Clone"]
-local bush = workspace["Bush"]
-local vehicles = workspace["Vehicles"]
+local real_main_event = (replicated_storage.FindFirstChild and replicated_storage:FindFirstChild("MainEvent")) or nil
+local event = real_main_event or setmetatable({}, {
+    __index = function(_, k)
+        if not real_main_event and replicated_storage.FindFirstChild then
+            real_main_event = replicated_storage:FindFirstChild("MainEvent")
+        end
+        if real_main_event then
+            local v = real_main_event[k]
+            if type(v) == "function" then
+                return function(_, ...)
+                    return v(real_main_event, ...)
+                end
+            end
+            return v
+        end
+        return function(...) end
+    end
+})
 
-local ignored = workspace["Ignored"]
+local clone = (workspace.FindFirstChild and workspace:FindFirstChild("Clone")) or nil
+local bush = (workspace.FindFirstChild and workspace:FindFirstChild("Bush")) or nil
+local vehicles = (workspace.FindFirstChild and workspace:FindFirstChild("Vehicles")) or nil
+local ignored = (workspace.FindFirstChild and workspace:FindFirstChild("Ignored")) or nil
 local destroy = game["Destroy"]
 
 local D = {}
@@ -3917,7 +4009,7 @@ do
         end
     end
 
-    setrawmetatable(event, new)
+    pcall(setrawmetatable, event, new)
 end
 
 -- > ( shop )
@@ -3930,13 +4022,18 @@ do
 
     local guns = {}
 
-    LPH_JIT_MAX(function()
+    task.spawn(function()
+        pcall(function()
         local armor_image_data = base64_decode("iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAYdEVYdFNvZnR3YXJlAFBhaW50Lk5FVCA1LjEuMvu8A7YAAAC2ZVhJZklJKgAIAAAABQAaAQUAAQAAAEoAAAAbAQUAAQAAAFIAAAAoAQMAAQAAAAIAAAAxAQIAEAAAAFoAAABphwQAAQAAAGoAAAAAAAAAYAAAAAEAAABgAAAAAQAAAFBhaW50Lk5FVCA1LjEuMgADAACQBwAEAAAAMDIzMAGgAwABAAAAAQAAAAWgBAABAAAAlAAAAAAAAAACAAEAAgAEAAAAUjk4AAIABwAEAAAAMDEwMAAAAADp1fY4ytpsegAAADxJREFUKFNjZICC/0AAZaIARiAA0UxgHhEArBqXaTAAMpVoEwdQIdHBA1cIAuiKYYqwApBiEIByoYCBAQDF5RgHWWRzJgAAAABJRU5ErkJggg==")
         local food_image_data = base64_decode("iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADdYAAA3WAZBveZwAAAAYdEVYdFNvZnR3YXJlAFBhaW50Lk5FVCA1LjEuMvu8A7YAAAC2ZVhJZklJKgAIAAAABQAaAQUAAQAAAEoAAAAbAQUAAQAAAFIAAAAoAQMAAQAAAAIAAAAxAQIAEAAAAFoAAABphwQAAQAAAGoAAAAAAAAAiF8BAOgDAACIXwEA6AMAAFBhaW50Lk5FVCA1LjEuMgADAACQBwAEAAAAMDIzMAGgAwABAAAAAQAAAAWgBAABAAAAlAAAAAAAAAACAAEAAgAEAAAAUjk4AAIABwAEAAAAMDEwMAAAAAC1cWHl18YwawAAADVJREFUKFNjZACC/0AAonEBRiAAM/AphMkxgXlAABKAAagQCoAYCQQ4FUCthZtICAwjhQwMACtDG/37O63ZAAAAAElFTkSuQmCC")
         local gun_image_data = base64_decode("iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAAAYdEVYdFNvZnR3YXJlAFBhaW50Lk5FVCA1LjEuMvu8A7YAAAC2ZVhJZklJKgAIAAAABQAaAQUAAQAAAEoAAAAbAQUAAQAAAFIAAAAoAQMAAQAAAAIAAAAxAQIAEAAAAFoAAABphwQAAQAAAGoAAAAAAAAADHcBAOgDAAAMdwEA6AMAAFBhaW50Lk5FVCA1LjEuMgADAACQBwAEAAAAMDIzMAGgAwABAAAAAQAAAAWgBAABAAAAlAAAAAAAAAACAAEAAgAEAAAAUjk4AAIABwAEAAAAMDEwMAAAAADu6i0YxswAAgAAAEZJREFUKFONzVkOABAMANFy/ztjpG0stbyfkoxK8lAa5jW0CMdwiqBnNwawZgpPEbLOLVr1F1E0bkP6ieBfmyhybIVeAyIVEbcn/IO0R3UAAAAASUVORK5CYII=")
         local misc_image_data = base64_decode("iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAE2MAABNjAWKDyE4AAAAYdEVYdFNvZnR3YXJlAFBhaW50Lk5FVCA1LjEuMvu8A7YAAAC2ZVhJZklJKgAIAAAABQAaAQUAAQAAAEoAAAAbAQUAAQAAAFIAAAAoAQMAAQAAAAIAAAAxAQIAEAAAAFoAAABphwQAAQAAAGoAAAAAAAAAhewBAOgDAACF7AEA6AMAAFBhaW50Lk5FVCA1LjEuMgADAACQBwAEAAAAMDIzMAGgAwABAAAAAQAAAAWgBAABAAAAlAAAAAAAAAACAAEAAgAEAAAAUjk4AAIABwAEAAAAMDEwMAAAAABl3jZUCVu4HgAAAExJREFUKFOlzksOACEIA1Dw/ndWSoAUPyvfZiBTrSpkmhidmhilhj2UMjx8I/gBsdYFrZpxQzvJ9pB/fSO3EBxvTBz6g2qItTyrO5EF1WUgDM661T4AAAAASUVORK5CYII=")
 
-        local gun_names = get_children(wait_for_child(wait_for_child(replicated_storage, "SkinModules", 9e9), "GunModels", 9e9))
+        local skin_mods = replicated_storage:FindFirstChild("SkinModules") or wait_for_child(replicated_storage, "SkinModules", 3)
+        if not skin_mods then return end
+        local gun_models = skin_mods:FindFirstChild("GunModels") or wait_for_child(skin_mods, "GunModels", 3)
+        if not gun_models then return end
+        local gun_names = get_children(gun_models)
 
         for i = 1, #gun_names do
             local name = string["lower"](gun_names[i]["Name"]:match("%[(.-)%]"))
@@ -3945,7 +4042,10 @@ do
             end
         end
 
-        local parts = get_children(ignored["Shop"])
+        if not ignored then return end
+        local shop_folder = find_first_child(ignored, "Shop")
+        if not shop_folder then return end
+        local parts = get_children(shop_folder)
 
         for i = 1, #parts do
             local shop = parts[i]
@@ -4033,7 +4133,8 @@ do
                 })
             end
         end
-    end)()
+    end)
+    end)
 
     -- >> ( purchasing )
 
@@ -22159,40 +22260,48 @@ end
 
 -- > ( update data )
 
-do
-    local leaderstats = wait_for_child(local_player, "leaderstats", 9e9)
-        local wanted = wait_for_child(leaderstats, "Wanted", 9e9)
+task.spawn(function()
+    pcall(function()
+        local leaderstats = wait_for_child(local_player, "leaderstats", 5)
+        if not leaderstats then return end
+        local wanted = wait_for_child(leaderstats, "Wanted", 5)
+        if not wanted then return end
 
-    local last_wanted = wanted["Value"]
-    local signal = signals["on_stomp"]
-    create_connection(wanted:GetPropertyChangedSignal("Value"), LPH_NO_VIRTUALIZE(function()
-        local new_value = wanted["Value"]
-        if new_value-last_wanted == 50 then
-            signal["Fire"](signal)
-        end
-        last_wanted = new_value
-    end))
+        local last_wanted = wanted["Value"]
+        local signal = signals["on_stomp"]
+        create_connection(wanted:GetPropertyChangedSignal("Value"), LPH_NO_VIRTUALIZE(function()
+            local new_value = wanted["Value"]
+            if new_value-last_wanted == 50 then
+                signal["Fire"](signal)
+            end
+            last_wanted = new_value
+        end))
 
-    local data_folder = wait_for_child(local_player, "DataFolder", 9e9)
-    local currency = wait_for_child(data_folder, "Currency", 9e9)
-    inventory = wait_for_child(data_folder, "Inventory", 9e9)
+        local data_folder = wait_for_child(local_player, "DataFolder", 5)
+        if not data_folder then return end
+        local currency = wait_for_child(data_folder, "Currency", 5)
+        if not currency then return end
+        inventory = wait_for_child(data_folder, "Inventory", 5)
 
-    create_connection(currency:GetPropertyChangedSignal("Value"), LPH_NO_VIRTUALIZE(function()
-        local new_cash = currency["Value"]
-        if new_cash < local_cash then
-            local_bought_count+=1
-        end
-        local_cash = new_cash
-    end))
+        create_connection(currency:GetPropertyChangedSignal("Value"), LPH_NO_VIRTUALIZE(function()
+            local new_cash = currency["Value"]
+            if new_cash < local_cash then
+                local_bought_count+=1
+            end
+            local_cash = new_cash
+        end))
 
-    local_cash = currency["Value"]
+        local_cash = currency["Value"]
 
-    local information_folder = wait_for_child(data_folder, "Information", 9e9)
-    local crew = find_first_child(information_folder, "Crew") or wait_for_child(information_folder, "Crew", 9e9)
+        local information_folder = wait_for_child(data_folder, "Information", 5)
+        if not information_folder then return end
+        local crew = find_first_child(information_folder, "Crew") or wait_for_child(information_folder, "Crew", 5)
+        if not crew then return end
 
-    local_crew = crew["Value"]
-
-    create_connection(crew:GetPropertyChangedSignal("Value"), LPH_NO_VIRTUALIZE(function()
         local_crew = crew["Value"]
-    end))
-end
+
+        create_connection(crew:GetPropertyChangedSignal("Value"), LPH_NO_VIRTUALIZE(function()
+            local_crew = crew["Value"]
+        end))
+    end)
+end)
