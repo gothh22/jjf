@@ -3705,11 +3705,28 @@ do
         end
     end)
 
-    create_connection(vehicles["ChildAdded"], on_vehicle_added)
-    create_connection(vehicles["ChildRemoved"], on_vehicle_removed)
+    local function hook_vehicles(veh)
+        if not veh then return end
+        pcall(function()
+            create_connection(veh["ChildAdded"], on_vehicle_added)
+            create_connection(veh["ChildRemoved"], on_vehicle_removed)
 
-    for _, part in get_children(vehicles) do
-        spawn(on_vehicle_added, part)
+            for _, part in get_children(veh) do
+                spawn(on_vehicle_added, part)
+            end
+        end)
+    end
+
+    if vehicles then
+        hook_vehicles(vehicles)
+    else
+        task.spawn(function()
+            local veh = workspace:WaitForChild("Vehicles", 5)
+            if veh then
+                vehicles = veh
+                hook_vehicles(veh)
+            end
+        end)
     end
 end
 
@@ -3828,6 +3845,9 @@ do
 
     -- >> ( remote hook )
 
+    local function hook_remote(ev)
+        if not ev or typeof(ev) ~= "Instance" then return end
+        pcall(function()
     local game_on_client_event = nil
 
     for _, v in getconnections(event["OnClientEvent"]) do
@@ -4010,6 +4030,20 @@ do
     end
 
     pcall(setrawmetatable, event, new)
+        end)
+    end
+
+    if typeof(event) == "Instance" then
+        hook_remote(event)
+    else
+        task.spawn(function()
+            local real = replicated_storage:WaitForChild("MainEvent", 5)
+            if real then
+                event = real
+                hook_remote(real)
+            end
+        end)
+    end
 end
 
 -- > ( shop )
@@ -6880,7 +6914,7 @@ do
             end
         end
 
-        local descendants = workspace["MAP"]:GetDescendants()
+        local descendants = (workspace:FindFirstChild("MAP") and workspace["MAP"]:GetDescendants()) or {}
 
         for i = 1, #descendants do
             apply_texture(descendants[i])
@@ -6924,7 +6958,11 @@ do
         end
 
         if value then
-            textures_connection = create_connection(workspace["MAP"]["DescendantAdded"], apply_texture)
+            local map_inst = workspace:FindFirstChild("MAP")
+            if map_inst then
+                textures_connection = create_connection(map_inst["DescendantAdded"], apply_texture)
+                apply_textures()
+            end
             apply_textures()
         else
             for i = 1, #variants do
@@ -7067,7 +7105,13 @@ do
         weather_part["CFrame"] = cframe_new(camera["CFrame"]["p"]) + offset
     end)
 
-    local ignored = ignored["Siren"]["Radius"]
+    local ignored_rad = nil
+    pcall(function()
+        if ignored and find_first_child(ignored, "Siren") and find_first_child(ignored["Siren"], "Radius") then
+            ignored_rad = ignored["Siren"]["Radius"]
+        end
+    end)
+    local ignored = ignored_rad or ignored or workspace
 
     create_connection(menu_references["weather"]["on_toggle_change"], function(value)
         if weather_part then
@@ -7263,32 +7307,40 @@ do
     local on_local_bullet_fired = signals["on_local_bullet_fired"]
     local on_rpg_fired = signals["on_rpg_fired"]
 
-    create_connection(ignored["Siren"]["Radius"]["ChildAdded"], LPH_NO_VIRTUALIZE(function(object)
-        wait()
-        local name = object["Name"]
-        if name == "BULLET_RAYS" then
-            local beam = find_first_child_of_class(object, "Beam")
-            if beam then
-                local cframe = beam["Attachment1"]["WorldCFrame"]
-                if get_attribute(object, "OwnerCharacter") == local_name then
-                    on_local_bullet_fired:Fire(object, beam, cframe, true)
-                else
-                    on_player_bullet_fired:Fire(object, beam, cframe, false)
+    pcall(function()
+        if ignored and find_first_child(ignored, "Siren") and find_first_child(ignored["Siren"], "Radius") then
+            create_connection(ignored["Siren"]["Radius"]["ChildAdded"], LPH_NO_VIRTUALIZE(function(object)
+                wait()
+                local name = object["Name"]
+                if name == "BULLET_RAYS" then
+                    local beam = find_first_child_of_class(object, "Beam")
+                    if beam then
+                        local cframe = beam["Attachment1"]["WorldCFrame"]
+                        if get_attribute(object, "OwnerCharacter") == local_name then
+                            on_local_bullet_fired:Fire(object, beam, cframe, true)
+                        else
+                            on_player_bullet_fired:Fire(object, beam, cframe, false)
+                        end
+                    end
                 end
-            end
+            end))
         end
-    end))
+    end)
 
-    create_connection(ignored["ChildAdded"], LPH_NO_VIRTUALIZE(function(object)
-        wait()
-        if object["Name"] == "Model" then
-            local launcher = wait_for_child(object, "Launcher", 5)
+    pcall(function()
+        if ignored then
+            create_connection(ignored["ChildAdded"], LPH_NO_VIRTUALIZE(function(object)
+                wait()
+                if object["Name"] == "Model" then
+                    local launcher = wait_for_child(object, "Launcher", 5)
 
-            if launcher then
-                on_rpg_fired:Fire(launcher, launcher["CFrame"]["lookVector"]*-1000)
-            end
+                    if launcher then
+                        on_rpg_fired:Fire(launcher, launcher["CFrame"]["lookVector"]*-1000)
+                    end
+                end
+            end))
         end
-    end))
+    end)
 
     menu_references["hud_section"] = menu["groups"]["visuals"]:create_section("general", "hud", 1, 0.35, 0.65)
         menu_references["server_position_indicator"] = menu_references["hud_section"]:create_element({["name"] = "server position indicator"}, {["toggle"] = {["flag"] = "server_position_indicator"}})
@@ -10433,21 +10485,29 @@ do
     local skins_list = {}
     local gun_list = {}
 
-    for gun, skin in require(replicated_storage["SkinModules"]) do
-        local gun = gun:lower():sub(2, -2)
-        if gun ~= "house" and gun ~= "mask" and gun ~= "wallet" and gun ~= "bat" and gun ~= "vehicle" and gun ~= "vehicles" then
-            if not gun_list[gun] then
-                gun_list[#gun_list+1] = gun
-            end
+    pcall(function()
+        local skin_mod = replicated_storage:FindFirstChild("SkinModules")
+        if skin_mod then
+            for gun, skin in require(skin_mod) do
+                local gun = gun:lower():sub(2, -2)
+                if gun ~= "house" and gun ~= "mask" and gun ~= "wallet" and gun ~= "bat" and gun ~= "vehicle" and gun ~= "vehicles" then
+                    if not gun_list[gun] then
+                        gun_list[#gun_list+1] = gun
+                    end
 
-            local new = {}
+                    local new = {}
+                    skins_list[gun] = new
 
-            skins_list[gun] = new
-            
-            for _, skin in skin do 
-                new[_] = skin
+                    for _, s in skin do
+                        new[_] = s
+                    end
+                end
             end
         end
+    end)
+
+    if #gun_list == 0 then
+        gun_list = {"aug", "revolver", "double-barrel sg", "shotgun", "smg", "tactical shotgun", "silencer", "rifle", "ak47", "p90", "lmg"}
     end
 
     menu_references["skins_section"] = menu["groups"]["visuals"]:create_panel_section("skins", "skins list", 1, true)
@@ -10575,7 +10635,12 @@ do
     end
 
     local sound_service = cloneref(game:GetService("SoundService"))
-    local sound_play = require(replicated_storage["GunSoundPlay"])
+    local sound_play = nil
+    pcall(function()
+        local gsp = replicated_storage:FindFirstChild("GunSoundPlay")
+        if gsp then sound_play = require(gsp) end
+    end)
+    if not sound_play then sound_play = { SoundPlay = function() end } end
     local old = clonefunction(sound_play["SoundPlay"])
     local player_bullet_volume = nil
     local local_bullet_volume = 1
@@ -20856,7 +20921,7 @@ do
             end
             data[1] = new_model
             data[2] = model_parts
-            new_model["Parent"] = workspace["Players"]
+            new_model["Parent"] = workspace:FindFirstChild("Players") or workspace
         end)
 
         local refresh_backtrack_data = function(player, character)
