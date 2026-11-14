@@ -653,2325 +653,2332 @@ end
 
 -- > ( ToshibaUI Engine & Juju Menu Adapter )
 
-local genv = (getgenv and getgenv()) or _G
-if genv.ToshibaUI and genv.ToshibaUI.Destroy then
-    pcall(genv.ToshibaUI.Destroy)
-end
+local menu = (function()
+    -- > ( ToshibaUI Engine & Juju Menu Adapter )
 
-----------------------------------------------------------------------
--- configuration & options
-----------------------------------------------------------------------
-local OPTIONS = {
-    ProfileName = (local_player and local_player.DisplayName) or (local_player and local_player.Name) or "juju",
-    ProfileTag = "juju recode",
-    SliderRing = true,
-    ToggleKey = Enum.KeyCode.RightShift,
-    FontDir = "toshiba_ui",
-}
-
-local WIN_W, WIN_H = 1198, 838
-
-local COL = {
-    window = Color3.fromRGB(21, 21, 21),
-    header = Color3.fromRGB(26, 26, 26),
-    card = Color3.fromRGB(28, 28, 28),
-    box = Color3.fromRGB(36, 36, 36),
-    track = Color3.fromRGB(52, 52, 52),
-    knob = Color3.fromRGB(104, 104, 104),
-    tabSel = Color3.fromRGB(33, 33, 41),
-    tabOff = Color3.fromRGB(72, 72, 72),
-    textOff = Color3.fromRGB(122, 122, 122),
-    textOn = Color3.fromRGB(245, 245, 245),
-    label = Color3.fromRGB(64, 64, 64),
-    line = Color3.fromRGB(40, 40, 40),
-    hint = Color3.fromRGB(125, 125, 125),
-    value = Color3.fromRGB(150, 150, 150),
-    accent = Color3.fromRGB(154, 213, 222),
-    success = Color3.fromRGB(110, 220, 110),
-    alert = Color3.fromRGB(255, 200, 60),
-    error = Color3.fromRGB(255, 75, 75),
-}
-
-local CFG = {
-    Scale = 1,
-    Transparency = 0,
-    Blur = 0,
-    Rounding = 30,
-    Hue = 263 / 360,
-    Animations = true,
-}
-
-local function accentColor()
-    return Color3.fromHSV(CFG.Hue, 0.55, 0.99)
-end
-
-local conns = {}
-local function connect(signal_obj, fn)
-    local c = signal_obj:Connect(fn)
-    conns[#conns + 1] = c
-    return c
-end
-
-----------------------------------------------------------------------
--- fonts & lucide icons
-----------------------------------------------------------------------
-local FONT_REG = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium)
-local FONT_BOLD = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.SemiBold)
-local FONT_NAME = "Gotham (fallback)"
-
-do
-    local gca = getcustomasset or getsynasset
-    if gca and writefile and readfile and isfile and makefolder then
-        local function httpGet(url)
-            local ok, res = pcall(function() return game:HttpGet(url) end)
-            if ok then return res end
-        end
-
-        local function looksLikeTTF(s)
-            if type(s) ~= "string" or #s < 10000 then return false end
-            local h = s:sub(1, 4)
-            return h == "\0\1\0\0" or h == "OTTO" or h == "true" or h == "ttcf"
-        end
-
-        local MIRRORS = {
-            ["Manrope-Medium.ttf"] = {
-                "https://raw.githubusercontent.com/sharanda/manrope/master/fonts/ttf/Manrope-Medium.ttf",
-                "https://cdn.jsdelivr.net/gh/sharanda/manrope@master/fonts/ttf/Manrope-Medium.ttf",
-            },
-            ["Manrope-SemiBold.ttf"] = {
-                "https://raw.githubusercontent.com/sharanda/manrope/master/fonts/ttf/Manrope-SemiBold.ttf",
-                "https://cdn.jsdelivr.net/gh/sharanda/manrope@master/fonts/ttf/Manrope-SemiBold.ttf",
-            },
-        }
-
-        local function getFontFile(file)
-            local path = OPTIONS.FontDir .. "/fonts/" .. file
-            if isfile(path) then
-                local ok, data = pcall(readfile, path)
-                if ok and looksLikeTTF(data) then return path end
-            end
-            for _, u in ipairs(MIRRORS[file] or {}) do
-                local data = httpGet(u)
-                if looksLikeTTF(data) then
-                    writefile(path, data)
-                    return path
-                end
-            end
-        end
-
-        pcall(function()
-            pcall(makefolder, OPTIONS.FontDir)
-            pcall(makefolder, OPTIONS.FontDir .. "/fonts")
-            local med = getFontFile("Manrope-Medium.ttf")
-            if med then
-                local semi = getFontFile("Manrope-SemiBold.ttf") or med
-                local json = http_service:JSONEncode({
-                    name = "Manrope",
-                    faces = {
-                        { name = "Medium", weight = 400, style = "normal", assetId = gca(med) },
-                        { name = "SemiBold", weight = 700, style = "normal", assetId = gca(semi) },
-                    },
-                })
-                writefile(OPTIONS.FontDir .. "/Manrope.json", json)
-                local family = gca(OPTIONS.FontDir .. "/Manrope.json")
-                FONT_REG = Font.new(family, Enum.FontWeight.Regular)
-                FONT_BOLD = Font.new(family, Enum.FontWeight.Bold)
-                FONT_NAME = "Manrope"
-            end
-        end)
-    end
-end
-
-local Lucide
-do
-    local ok, lib = pcall(function()
-        return loadstring(game:HttpGet("https://github.com/latte-soft/lucide-roblox/releases/latest/download/lucide-roblox.luau"))()
-    end)
-    if ok and type(lib) == "table" then
-        Lucide = lib
-    end
-end
-
-local function applyIcon(img, name)
-    if not Lucide then return end
-    local ok, a = pcall(Lucide.GetAsset, name, 48)
-    if ok and a then
-        img.Image = a.Url
-        img.ImageRectSize = a.ImageRectSize
-        img.ImageRectOffset = a.ImageRectOffset
-    end
-end
-
-----------------------------------------------------------------------
--- UI building helpers
-----------------------------------------------------------------------
-local function mk(class, props, parent)
-    local o = Instance.new(class)
-    for k, v in pairs(props) do
-        o[k] = v
-    end
-    o.Parent = parent
-    return o
-end
-
-local function tw(obj, t, props)
-    if not CFG.Animations then
-        for k, v in pairs(props) do obj[k] = v end
-        return
-    end
-    tween_service:Create(obj, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
-end
-
-local accentHooks, glass, corners = {}, {}, {}
-
-local function onAccent(fn)
-    fn(accentColor())
-    accentHooks[#accentHooks + 1] = fn
-end
-
-local function glassify(obj, mult)
-    obj.BackgroundTransparency = CFG.Transparency * mult
-    glass[#glass + 1] = { obj, mult }
-end
-
-local function corner(obj, px, scalable)
-    local c = mk("UICorner", { CornerRadius = UDim.new(0, px) }, obj)
-    if scalable then
-        corners[#corners + 1] = { c, px / 30 }
-    end
-    return c
-end
-
-local function pill(obj)
-    return mk("UICorner", { CornerRadius = UDim.new(0.5, 0) }, obj)
-end
-
-local function lbl(parent, txt, size, color, pos, sz, opts)
-    opts = opts or {}
-    return mk("TextLabel", {
-        Name = opts.name or "Label",
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        Text = txt,
-        TextSize = size,
-        TextColor3 = color,
-        FontFace = opts.bold and FONT_BOLD or FONT_REG,
-        TextXAlignment = opts.align or Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-        Position = pos,
-        Size = sz,
-    }, parent)
-end
-
-local function isPress(i)
-    return i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch
-end
-
-local function isMove(i)
-    return i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch
-end
-
-local function guiParent()
-    if gethui then
-        local ok, h = pcall(gethui)
-        if ok and h then return h end
-    end
-    local ok = pcall(function() return CoreGui.Name end)
-    if ok then return CoreGui end
-    return local_player:WaitForChild("PlayerGui")
-end
-
-----------------------------------------------------------------------
--- ScreenGui & root frames
-----------------------------------------------------------------------
-local gui = mk("ScreenGui", {
-    Name = "ToshibaUI_Juju",
-    ResetOnSpawn = false,
-    DisplayOrder = 9999,
-    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-}, guiParent())
-
-local blurFx = mk("BlurEffect", { Name = "ToshibaBlur", Size = 0 }, Lighting)
-
-local uiScale = mk("UIScale", { Scale = 1 }, gui)
-
-local holder = mk("Frame", {
-    Name = "WindowHolder",
-    BackgroundTransparency = 1,
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.fromOffset(WIN_W, WIN_H),
-}, gui)
-
--- drop shadow
-local shadow = mk("Frame", { Name = "Shadow", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1) }, holder)
-for _, e in ipairs({ 6, 12, 20 }) do
-    local f = mk("Frame", {
-        BackgroundColor3 = Color3.new(0, 0, 0),
-        BackgroundTransparency = 0.88,
-        BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(0.5, 0, 0.5, 10),
-        Size = UDim2.fromOffset(WIN_W + e * 2, WIN_H + e * 2),
-    }, shadow)
-    mk("UICorner", { CornerRadius = UDim.new(0, 30 + e) }, f)
-end
-
-local mainFrame = mk("Frame", {
-    Name = "Main",
-    BackgroundColor3 = COL.window,
-    BorderSizePixel = 0,
-    Size = UDim2.fromScale(1, 1),
-    ZIndex = 2,
-}, holder)
-corner(mainFrame, 30, true)
-glassify(mainFrame, 1)
-
-local sidebar = mk("Frame", { Name = "Sidebar", BackgroundTransparency = 1, Size = UDim2.fromOffset(326, WIN_H) }, mainFrame)
-
--- profile card
-do
-    local card = mk("Frame", {
-        Name = "Profile",
-        BackgroundColor3 = Color3.fromRGB(24, 24, 24),
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(26, 745),
-        Size = UDim2.fromOffset(287, 75),
-    }, sidebar)
-    corner(card, 20)
-    local av = mk("ImageLabel", {
-        BackgroundColor3 = Color3.fromRGB(30, 30, 30),
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(9, 13),
-        Size = UDim2.fromOffset(48, 48),
-        Image = local_player and ("rbxthumb://type=AvatarHeadShot&id=" .. local_player.UserId .. "&w=150&h=150") or "",
-    }, card)
-    corner(av, 12)
-    lbl(card, OPTIONS.ProfileName, 17, COL.textOn, UDim2.fromOffset(71, 14), UDim2.fromOffset(200, 22), { bold = true, name = "Name" })
-    lbl(card, OPTIONS.ProfileTag, 12, Color3.fromRGB(100, 100, 100), UDim2.fromOffset(71, 38), UDim2.fromOffset(200, 16), { name = "Tag" })
-end
-
--- header (description + search)
-local header = mk("Frame", {
-    Name = "Header",
-    BackgroundColor3 = COL.header,
-    BorderSizePixel = 0,
-    Position = UDim2.fromOffset(336, 12),
-    Size = UDim2.fromOffset(852, 98),
-}, mainFrame)
-corner(header, 24, true)
-glassify(header, 1)
-
-local infoBtn = mk("Frame", {
-    Name = "Info",
-    BackgroundColor3 = Color3.fromRGB(120, 120, 120),
-    BorderSizePixel = 0,
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.fromOffset(47, 49),
-    Size = UDim2.fromOffset(26, 26),
-}, header)
-pill(infoBtn)
-lbl(infoBtn, "i", 17, COL.header, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { bold = true, align = Enum.TextXAlignment.Center })
-
-local descLabel = lbl(header, "Juju Da Hood | Toshiba UI Reborn", 19, COL.hint, UDim2.fromOffset(81, 0), UDim2.fromOffset(540, 98), { name = "Description" })
-local function setDesc(t)
-    if t then descLabel.Text = t end
-end
-
-local searchWrap = mk("Frame", {
-    Name = "Search",
-    BackgroundColor3 = COL.box,
-    BorderSizePixel = 0,
-    Position = UDim2.fromOffset(639, 22),
-    Size = UDim2.fromOffset(191, 54),
-}, header)
-corner(searchWrap, 18, true)
-glassify(searchWrap, 0.5)
-
-local searchBox = mk("TextBox", {
-    BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(16, 0),
-    Size = UDim2.fromOffset(135, 54),
-    Text = "",
-    PlaceholderText = "Search...",
-    PlaceholderColor3 = Color3.fromRGB(96, 96, 96),
-    TextColor3 = Color3.fromRGB(205, 205, 205),
-    TextSize = 18,
-    FontFace = FONT_REG,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    ClearTextOnFocus = false,
-}, searchWrap)
-
-do
-    local ic = mk("ImageLabel", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(159, 17),
-        Size = UDim2.fromOffset(20, 20),
-        ImageColor3 = Color3.fromRGB(110, 110, 110),
-    }, searchWrap)
-    applyIcon(ic, "search")
-end
-
-local content = mk("Frame", {
-    Name = "Content",
-    BackgroundTransparency = 1,
-    ClipsDescendants = true,
-    Position = UDim2.fromOffset(336, 121),
-    Size = UDim2.fromOffset(830, 705),
-}, mainFrame)
-
-----------------------------------------------------------------------
--- notification toast system
-----------------------------------------------------------------------
-local function makeToast(text, type, duration)
-    local color = (type == 1 and COL.success) or (type == 2 and COL.alert) or (type == 3 and COL.error) or accentColor()
-    local iconName = (type == 1 and "check") or (type == 2 and "alert-triangle") or (type == 3 and "alert-circle") or "info"
-
-    local toast = mk("Frame", {
-        Name = "Toast",
-        BackgroundColor3 = COL.window,
-        BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(0.5, 1),
-        Position = UDim2.new(0.5, 0, 1, 60),
-        Size = UDim2.fromOffset(360, 48),
-        ZIndex = 200,
-    }, gui)
-    corner(toast, 14, true)
-    mk("UIStroke", { Color = color, Thickness = 1.5 }, toast)
-
-    local ic = mk("ImageLabel", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(14, 14),
-        Size = UDim2.fromOffset(20, 20),
-        ImageColor3 = color,
-        ZIndex = 201,
-    }, toast)
-    applyIcon(ic, iconName)
-
-    lbl(toast, text, 14, COL.textOn, UDim2.fromOffset(44, 0), UDim2.fromOffset(300, 48), { bold = true })
-
-    tw(toast, 0.25, { Position = UDim2.new(0.5, 0, 1, -20) })
-    task.delay(clamp(duration and typeof(duration) == "number" and duration or 2.5, 1, 7), function()
-        tw(toast, 0.25, { Position = UDim2.new(0.5, 0, 1, 60) })
-        task.delay(0.26, function() toast:Destroy() end)
-    end)
-end
-
-----------------------------------------------------------------------
--- control primitives
-----------------------------------------------------------------------
-local scrollers = {}
-local function lockScroll(lock)
-    for _, s in ipairs(scrollers) do s.ScrollingEnabled = not lock end
-end
-
-local function makeSwitch(parent, pos, default, onChange)
-    local state = default and true or false
-    local track = mk("TextButton", {
-        Name = "Switch",
-        Text = "",
-        AutoButtonColor = false,
-        BackgroundColor3 = COL.track,
-        BorderSizePixel = 0,
-        Position = pos,
-        Size = UDim2.fromOffset(38, 20),
-    }, parent)
-    pill(track)
-    local knob = mk("Frame", {
-        Name = "Knob",
-        BackgroundColor3 = COL.knob,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(4, 4),
-        Size = UDim2.fromOffset(12, 12),
-    }, track)
-    pill(knob)
-
-    local function paint(animate)
-        local tcol = state and accentColor() or COL.track
-        local kcol = state and Color3.new(1, 1, 1) or COL.knob
-        local kpos = state and UDim2.fromOffset(22, 4) or UDim2.fromOffset(4, 4)
-        if animate then
-            tw(track, 0.18, { BackgroundColor3 = tcol })
-            tw(knob, 0.18, { Position = kpos, BackgroundColor3 = kcol })
-        else
-            track.BackgroundColor3 = tcol
-            knob.Position = kpos
-            knob.BackgroundColor3 = kcol
-        end
-    end
-    paint(false)
-    onAccent(function()
-        if state then track.BackgroundColor3 = accentColor() end
-    end)
-
-    local sw = {}
-    function sw.Set(v, silent)
-        state = v and true or false
-        paint(true)
-        if not silent and onChange then onChange(state) end
-    end
-    function sw.Get() return state end
-    function sw.Toggle() sw.Set(not state) end
-    track.Activated:Connect(sw.Toggle)
-    return sw
-end
-
-local function makeSlider(parent, x, cy, w, min, max, default, step, onChange, ringFill)
-    local hit = mk("TextButton", {
-        Name = "Slider",
-        Text = "",
-        AutoButtonColor = false,
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(x, cy - 14),
-        Size = UDim2.fromOffset(w, 28),
-    }, parent)
-    local bar = mk("Frame", {
-        Name = "Bar",
-        BackgroundColor3 = COL.track,
-        BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(0, 0.5),
-        Position = UDim2.new(0, 0, 0.5, 0),
-        Size = UDim2.new(1, 0, 0, 3),
-    }, hit)
-    pill(bar)
-    local fill = mk("Frame", { Name = "Fill", BackgroundColor3 = accentColor(), BorderSizePixel = 0, Size = UDim2.new(0, 0, 1, 0) }, bar)
-    pill(fill)
-    onAccent(function(c) fill.BackgroundColor3 = c end)
-    local knob = mk("Frame", {
-        Name = "Knob",
-        BackgroundColor3 = OPTIONS.SliderRing and ringFill or Color3.new(1, 1, 1),
-        BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(0, 0, 0.5, 0),
-        Size = UDim2.fromOffset(OPTIONS.SliderRing and 13 or 10, OPTIONS.SliderRing and 13 or 10),
-    }, hit)
-    pill(knob)
-    if OPTIONS.SliderRing then
-        mk("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, knob)
+    local genv = (getgenv and getgenv()) or _G
+    if genv.ToshibaUI and genv.ToshibaUI.Destroy then
+        pcall(genv.ToshibaUI.Destroy)
     end
 
-    local value = default or min
-    local dragging = false
-    local api = {}
-
-    local function setAlpha(a)
-        a = math.clamp(a, 0, 1)
-        fill.Size = UDim2.new(a, 0, 1, 0)
-        knob.Position = UDim2.new(a, 0, 0.5, 0)
-    end
-
-    function api.Set(v, silent)
-        v = math.clamp(v, min, max)
-        if step and step > 0 then
-            v = math.floor((v - min) / step + 0.5) * step + min
-        end
-        value = v
-        setAlpha((max > min) and ((v - min) / (max - min)) or 0)
-        if not silent and onChange then onChange(v) end
-    end
-    function api.Get() return value end
-
-    local function fromInput(pos)
-        local a = (pos.X - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1)
-        api.Set(min + math.clamp(a, 0, 1) * (max - min))
-    end
-
-    hit.InputBegan:Connect(function(i)
-        if isPress(i) then
-            dragging = true
-            lockScroll(true)
-            fromInput(i.Position)
-        end
-    end)
-    connect(user_input_service.InputChanged, function(i)
-        if dragging and isMove(i) then fromInput(i.Position) end
-    end)
-    connect(user_input_service.InputEnded, function(i)
-        if dragging and isPress(i) then
-            dragging = false
-            lockScroll(false)
-        end
-    end)
-
-    api.Set(default or min, true)
-    return api
-end
-
-local function makeDropdown(parent, pos, w, options, default, multi, onChange)
-    local state = default or (multi and {} or (options[1] or ""))
-    local open = false
-
-    local btn = mk("TextButton", {
-        Name = "Dropdown",
-        Text = "",
-        AutoButtonColor = false,
-        BackgroundColor3 = COL.box,
-        BorderSizePixel = 0,
-        Position = pos,
-        Size = UDim2.fromOffset(w, 36),
-    }, parent)
-    corner(btn, 10, true)
-    glassify(btn, 0.5)
-
-    local txt = lbl(btn, "", 14, COL.textOn, UDim2.fromOffset(12, 0), UDim2.fromOffset(w - 38, 36))
-    local chev = mk("ImageLabel", {
-        Name = "Arrow",
-        BackgroundTransparency = 1,
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -10, 0.5, 0),
-        Size = UDim2.fromOffset(16, 16),
-        ImageColor3 = COL.hint,
-    }, btn)
-    applyIcon(chev, "chevron-down")
-
-    local function getDisplay()
-        if multi then
-            local t = {}
-            for k, v in pairs(state) do
-                if v then t[#t + 1] = tostring(k) end
-            end
-            return #t > 0 and table.concat(t, ", ") or "None"
-        else
-            return tostring(state)
-        end
-    end
-    txt.Text = getDisplay()
-
-    local list = mk("Frame", {
-        Name = "List",
-        BackgroundColor3 = Color3.fromRGB(32, 32, 32),
-        BorderSizePixel = 0,
-        ClipsDescendants = true,
-        Position = UDim2.fromOffset(pos.X.Offset, pos.Y.Offset + 40),
-        Size = UDim2.fromOffset(w, 0),
-        ZIndex = 50,
-        Visible = false,
-    }, parent)
-    corner(list, 10, true)
-    mk("UIStroke", { Color = COL.line, Thickness = 1 }, list)
-    mk("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, list)
-
-    local totalH = 4 + #options * 32
-    for idx, opt in ipairs(options) do
-        local optBtn = mk("TextButton", {
-            Name = tostring(opt),
-            LayoutOrder = idx,
-            Text = "",
-            AutoButtonColor = false,
-            BackgroundTransparency = 1,
-            Size = UDim2.fromOffset(w, 30),
-            ZIndex = 51,
-        }, list)
-        local optLbl = lbl(optBtn, tostring(opt), 14, COL.textOff, UDim2.fromOffset(12, 0), UDim2.fromOffset(w - 40, 30))
-        optLbl.ZIndex = 52
-        local check = mk("ImageLabel", {
-            Name = "Check",
-            BackgroundTransparency = 1,
-            AnchorPoint = Vector2.new(1, 0.5),
-            Position = UDim2.new(1, -10, 0.5, 0),
-            Size = UDim2.fromOffset(14, 14),
-            ImageColor3 = accentColor(),
-            Visible = multi and (state[opt] == true) or (state == opt),
-            ZIndex = 52,
-        }, optBtn)
-        applyIcon(check, "check")
-
-        optBtn.Activated:Connect(function()
-            if multi then
-                state[opt] = not state[opt]
-                check.Visible = state[opt]
-                txt.Text = getDisplay()
-                if onChange then onChange(state) end
-            else
-                state = opt
-                txt.Text = getDisplay()
-                open = false
-                tw(chev, 0.2, { Rotation = 0 })
-                tw(list, 0.2, { Size = UDim2.fromOffset(w, 0) })
-                task.delay(0.2, function() list.Visible = false end)
-                if onChange then onChange({ opt }) end
-            end
-        end)
-    end
-
-    btn.Activated:Connect(function()
-        open = not open
-        tw(chev, 0.2, { Rotation = open and 180 or 0 })
-        if open then
-            list.Visible = true
-            tw(list, 0.2, { Size = UDim2.fromOffset(w, totalH) })
-        else
-            tw(list, 0.2, { Size = UDim2.fromOffset(w, 0) })
-            task.delay(0.2, function() list.Visible = false end)
-        end
-    end)
-
-    local ddObj = {}
-    function ddObj.Set(val, silent)
-        state = val
-        txt.Text = getDisplay()
-        if not silent and onChange then onChange(multi and state or { state }) end
-    end
-    function ddObj.Get() return state end
-    return ddObj
-end
-
-local function makeColorpicker(parent, pos, defaultColor, defaultAlpha, onChange)
-    local curCol = defaultColor or Color3.fromRGB(255, 255, 255)
-    local curAlpha = defaultAlpha or 0
-    local open = false
-
-    local preview = mk("TextButton", {
-        Name = "ColorPreview",
-        Text = "",
-        AutoButtonColor = false,
-        BackgroundColor3 = curCol,
-        BorderSizePixel = 0,
-        Position = pos,
-        Size = UDim2.fromOffset(36, 24),
-    }, parent)
-    corner(preview, 8, true)
-    mk("UIStroke", { Color = Color3.fromRGB(60, 60, 60), Thickness = 1.5 }, preview)
-
-    local pop = mk("Frame", {
-        Name = "ColorPopup",
-        BackgroundColor3 = Color3.fromRGB(28, 28, 28),
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(pos.X.Offset - 160, pos.Y.Offset + 30),
-        Size = UDim2.fromOffset(200, 180),
-        ZIndex = 60,
-        Visible = false,
-    }, parent)
-    corner(pop, 14, true)
-    mk("UIStroke", { Color = COL.line, Thickness = 1 }, pop)
-
-    local rVal, gVal, bVal = math.floor(curCol.R * 255), math.floor(curCol.G * 255), math.floor(curCol.B * 255)
-    local aVal = math.floor(curAlpha * 100)
-
-    local function updateColor()
-        curCol = Color3.fromRGB(rVal, gVal, bVal)
-        curAlpha = aVal / 100
-        preview.BackgroundColor3 = curCol
-        if onChange then onChange(curCol, curAlpha) end
-    end
-
-    local labels = { "R", "G", "B", "A" }
-    local vals = { rVal, gVal, bVal, aVal }
-    local maxs = { 255, 255, 255, 100 }
-
-    for i = 1, 4 do
-        local y = 14 + (i - 1) * 38
-        lbl(pop, labels[i], 13, COL.hint, UDim2.fromOffset(12, y), UDim2.fromOffset(16, 24), { bold = true })
-        local vLbl = lbl(pop, tostring(vals[i]), 13, COL.value, UDim2.fromOffset(160, y), UDim2.fromOffset(30, 24), { align = Enum.TextXAlignment.Right })
-        makeSlider(pop, 36, y + 12, 115, 0, maxs[i], vals[i], 1, function(v)
-            vLbl.Text = tostring(math.floor(v))
-            if i == 1 then rVal = math.floor(v)
-            elseif i == 2 then gVal = math.floor(v)
-            elseif i == 3 then bVal = math.floor(v)
-            elseif i == 4 then aVal = math.floor(v) end
-            updateColor()
-        end, COL.box)
-    end
-
-    preview.Activated:Connect(function()
-        open = not open
-        pop.Visible = open
-    end)
-
-    local cpObj = {}
-    function cpObj.Set(c, a, silent)
-        if c then curCol = c; preview.BackgroundColor3 = curCol end
-        if a then curAlpha = a end
-        if not silent and onChange then onChange(curCol, curAlpha) end
-    end
-    function cpObj.Get() return curCol, curAlpha end
-    return cpObj
-end
-
-local function makeKeybind(parent, pos, defaultKey, onChange)
-    local curKey = defaultKey or Enum.KeyCode.Unknown
-    local listening = false
-
-    local btn = mk("TextButton", {
-        Name = "Keybind",
-        Text = "",
-        AutoButtonColor = false,
-        BackgroundColor3 = COL.box,
-        BorderSizePixel = 0,
-        Position = pos,
-        Size = UDim2.fromOffset(80, 28),
-    }, parent)
-    corner(btn, 8, true)
-    local kLbl = lbl(btn, "", 13, COL.value, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { align = Enum.TextXAlignment.Center, bold = true })
-
-    local function updateDisplay()
-        local name = typeof(curKey) == "EnumItem" and curKey.Name or tostring(curKey or "None")
-        kLbl.Text = "[ " .. name .. " ]"
-        kLbl.TextColor3 = COL.value
-    end
-    updateDisplay()
-
-    btn.Activated:Connect(function()
-        if listening then return end
-        listening = true
-        kLbl.Text = "[ ... ]"
-        kLbl.TextColor3 = accentColor()
-
-        local conn
-        conn = user_input_service.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Keyboard then
-                if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.Backspace then
-                    curKey = Enum.KeyCode.Unknown
-                else
-                    curKey = input.KeyCode
-                end
-                conn:Disconnect()
-                listening = false
-                updateDisplay()
-                if onChange then onChange(curKey) end
-            elseif input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 or input.UserInputType == Enum.UserInputType.MouseButton3 then
-                curKey = input.UserInputType
-                conn:Disconnect()
-                listening = false
-                updateDisplay()
-                if onChange then onChange(curKey) end
-            end
-        end)
-    end)
-
-    local kbObj = {}
-    function kbObj.Set(k, silent)
-        curKey = k
-        updateDisplay()
-        if not silent and onChange then onChange(curKey) end
-    end
-    function kbObj.Get() return curKey end
-    return kbObj
-end
-
-local function makeTextbox(parent, pos, w, defaultText, placeholder, onChange)
-    local wrap = mk("Frame", {
-        Name = "TextboxWrap",
-        BackgroundColor3 = COL.box,
-        BorderSizePixel = 0,
-        Position = pos,
-        Size = UDim2.fromOffset(w, 34),
-    }, parent)
-    corner(wrap, 10, true)
-    glassify(wrap, 0.5)
-
-    local box = mk("TextBox", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(10, 0),
-        Size = UDim2.fromOffset(w - 20, 34),
-        Text = defaultText or "",
-        PlaceholderText = placeholder or "Enter text...",
-        PlaceholderColor3 = COL.hint,
-        TextColor3 = COL.textOn,
-        TextSize = 14,
-        FontFace = FONT_REG,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ClearTextOnFocus = false,
-    }, wrap)
-
-    box.FocusLost:Connect(function()
-        if onChange then onChange(box.Text) end
-    end)
-
-    local tbObj = {}
-    function tbObj.Set(t, silent)
-        box.Text = tostring(t or "")
-        if not silent and onChange then onChange(box.Text) end
-    end
-    function tbObj.Get() return box.Text end
-    return tbObj
-end
-
-local function makeButton(parent, pos, w, text, confirmation, onClick)
-    local confirmed = false
-    local btn = mk("TextButton", {
-        Name = "Button",
-        Text = "",
-        AutoButtonColor = false,
-        BackgroundColor3 = COL.box,
-        BorderSizePixel = 0,
-        Position = pos,
-        Size = UDim2.fromOffset(w, 36),
-    }, parent)
-    corner(btn, 10, true)
-    glassify(btn, 0.5)
-
-    local bLbl = lbl(btn, text, 14, COL.textOn, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { align = Enum.TextXAlignment.Center, bold = true })
-
-    btn.MouseEnter:Connect(function() tw(btn, 0.15, { BackgroundColor3 = COL.track }) end)
-    btn.MouseLeave:Connect(function()
-        tw(btn, 0.15, { BackgroundColor3 = COL.box })
-        if confirmed then
-            confirmed = false
-            bLbl.Text = text
-            bLbl.TextColor3 = COL.textOn
-        end
-    end)
-
-    btn.Activated:Connect(function()
-        if confirmation and not confirmed then
-            confirmed = true
-            bLbl.Text = "Confirm?"
-            bLbl.TextColor3 = accentColor()
-            task.delay(3, function()
-                if confirmed then
-                    confirmed = false
-                    bLbl.Text = text
-                    bLbl.TextColor3 = COL.textOn
-                end
-            end)
-            return
-        end
-        confirmed = false
-        bLbl.Text = text
-        bLbl.TextColor3 = COL.textOn
-        if onClick then onClick() end
-    end)
-
-    return btn
-end
-
-----------------------------------------------------------------------
--- makeCard (with ENLARGED 26x26 chevron & expandable settings)
-----------------------------------------------------------------------
-local function makeCard(parentCol, name, opts)
-    opts = opts or {}
-    local W = opts.full and 830 or 410
-    local card = mk("Frame", {
-        Name = name,
-        BackgroundColor3 = COL.card,
-        BorderSizePixel = 0,
-        ClipsDescendants = true,
-        Size = UDim2.fromOffset(W, 70),
-    }, parentCol)
-    corner(card, 22, true)
-    glassify(card, 1)
-
-    local nameLbl = lbl(card, name, 22, COL.textOff, UDim2.fromOffset(20, 0), UDim2.fromOffset(W - 140, 70), { name = "Name" })
-    local hit = mk("TextButton", {
-        Name = "Hit",
-        Text = "",
-        AutoButtonColor = false,
-        BackgroundTransparency = 1,
-        Size = UDim2.fromOffset(W - 120, 70),
-        ZIndex = 2,
-    }, card)
-
-    local hasArrow = opts.arrow and true or false
-    local boxW = hasArrow and 108 or 56
-    local box = mk("Frame", {
-        Name = "Box",
-        BackgroundColor3 = COL.box,
-        BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.fromOffset(W - 12, 35),
-        Size = UDim2.fromOffset(boxW, 40),
-        ZIndex = 3,
-    }, card)
-    corner(box, 14, true)
-    glassify(box, 0.5)
-
-    local sw
-    sw = makeSwitch(box, UDim2.fromOffset(9, 10), opts.default, function(on)
-        tw(nameLbl, 0.18, { TextColor3 = on and COL.textOn or COL.textOff })
-        if opts.onChange then opts.onChange(on) end
-    end)
-    if opts.default then nameLbl.TextColor3 = COL.textOn end
-
-    hit.Activated:Connect(function()
-        sw.Toggle()
-        setDesc(opts.desc)
-    end)
-
-    local settingsFrame = nil
-    local extraHeight = 0
-    local expanded = false
-    local chevBtn = nil
-    local sepLine = nil
-
-    local function setupExpandableUI()
-        if chevBtn then return end
-        box.Size = UDim2.fromOffset(108, 40)
-        sepLine = mk("Frame", {
-            Name = "Sep",
-            BackgroundColor3 = COL.line,
-            BorderSizePixel = 0,
-            Position = UDim2.fromOffset(56, 8),
-            Size = UDim2.fromOffset(1, 24),
-        }, box)
-
-        -- Prominent enlarged chevron (26x26)
-        chevBtn = mk("ImageButton", {
-            Name = "Chevron",
-            AutoButtonColor = false,
-            BackgroundTransparency = 1,
-            AnchorPoint = Vector2.new(0.5, 0.5),
-            Position = UDim2.fromOffset(84, 20),
-            Size = UDim2.fromOffset(26, 26),
-            ImageColor3 = Color3.fromRGB(150, 150, 150),
-        }, box)
-        applyIcon(chevBtn, "chevron-down")
-
-        chevBtn.MouseEnter:Connect(function()
-            tw(chevBtn, 0.15, { ImageColor3 = Color3.fromRGB(240, 240, 240) })
-        end)
-        chevBtn.MouseLeave:Connect(function()
-            tw(chevBtn, 0.15, { ImageColor3 = expanded and accentColor() or Color3.fromRGB(150, 150, 150) })
-        end)
-
-        settingsFrame = mk("Frame", {
-            Name = "Settings",
-            BackgroundTransparency = 1,
-            Position = UDim2.fromOffset(0, 70),
-            Size = UDim2.fromOffset(W, extraHeight),
-        }, card)
-        mk("UIListLayout", {
-            Padding = UDim.new(0, 6),
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            HorizontalAlignment = Enum.HorizontalAlignment.Center,
-        }, settingsFrame)
-
-        chevBtn.Activated:Connect(function()
-            expanded = not expanded
-            tw(chevBtn, 0.22, { Rotation = expanded and 180 or 0, ImageColor3 = expanded and accentColor() or Color3.fromRGB(150, 150, 150) })
-            tw(card, 0.25, { Size = UDim2.fromOffset(W, expanded and (70 + extraHeight) or 70) })
-            setDesc(opts.desc)
-        end)
-    end
-
-    if hasArrow then setupExpandableUI() end
-
-    local cardApi = {
-        card = card,
-        box = box,
-        sw = sw,
-        nameLbl = nameLbl,
+    ----------------------------------------------------------------------
+    -- configuration & options
+    ----------------------------------------------------------------------
+    local OPTIONS = {
+        ProfileName = (local_player and local_player.DisplayName) or (local_player and local_player.Name) or "juju",
+        ProfileTag = "juju recode",
+        SliderRing = true,
+        ToggleKey = Enum.KeyCode.RightShift,
+        FontDir = "toshiba_ui",
     }
 
-    function cardApi.enableSettings()
-        setupExpandableUI()
+    local WIN_W, WIN_H = 1198, 838
+
+    local COL = {
+        window = Color3.fromRGB(21, 21, 21),
+        header = Color3.fromRGB(26, 26, 26),
+        card = Color3.fromRGB(28, 28, 28),
+        box = Color3.fromRGB(36, 36, 36),
+        track = Color3.fromRGB(52, 52, 52),
+        knob = Color3.fromRGB(104, 104, 104),
+        tabSel = Color3.fromRGB(33, 33, 41),
+        tabOff = Color3.fromRGB(72, 72, 72),
+        textOff = Color3.fromRGB(122, 122, 122),
+        textOn = Color3.fromRGB(245, 245, 245),
+        label = Color3.fromRGB(64, 64, 64),
+        line = Color3.fromRGB(40, 40, 40),
+        hint = Color3.fromRGB(125, 125, 125),
+        value = Color3.fromRGB(150, 150, 150),
+        accent = Color3.fromRGB(154, 213, 222),
+        success = Color3.fromRGB(110, 220, 110),
+        alert = Color3.fromRGB(255, 200, 60),
+        error = Color3.fromRGB(255, 75, 75),
+    }
+
+    local CFG = {
+        Scale = 1,
+        Transparency = 0,
+        Blur = 0,
+        Rounding = 30,
+        Hue = 263 / 360,
+        Animations = true,
+    }
+
+    local function accentColor()
+        return Color3.fromHSV(CFG.Hue, 0.55, 0.99)
     end
 
-    function cardApi.addSettingRow(type, name, props)
-        setupExpandableUI()
-        local rowW = W - 20
-        extraHeight = extraHeight + 52
-        settingsFrame.Size = UDim2.fromOffset(W, extraHeight)
-        if expanded then
-            card.Size = UDim2.fromOffset(W, 70 + extraHeight)
-        end
+    local conns = {}
+    local function connect(signal_obj, fn)
+        local c = signal_obj:Connect(fn)
+        conns[#conns + 1] = c
+        return c
+    end
 
-        local row = mk("Frame", {
-            Name = name,
-            BackgroundColor3 = COL.box,
+    ----------------------------------------------------------------------
+    -- fonts & lucide icons
+    ----------------------------------------------------------------------
+    local FONT_REG = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium)
+    local FONT_BOLD = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.SemiBold)
+    local FONT_NAME = "Gotham (fallback)"
+
+    do
+        local gca = getcustomasset or getsynasset
+        if gca and writefile and readfile and isfile and makefolder then
+            local function httpGet(url)
+                local ok, res = pcall(function() return game:HttpGet(url) end)
+                if ok then return res end
+            end
+
+            local function looksLikeTTF(s)
+                if type(s) ~= "string" or #s < 10000 then return false end
+                local h = s:sub(1, 4)
+                return h == "\0\1\0\0" or h == "OTTO" or h == "true" or h == "ttcf"
+            end
+
+            local MIRRORS = {
+                ["Manrope-Medium.ttf"] = {
+                    "https://raw.githubusercontent.com/sharanda/manrope/master/fonts/ttf/Manrope-Medium.ttf",
+                    "https://cdn.jsdelivr.net/gh/sharanda/manrope@master/fonts/ttf/Manrope-Medium.ttf",
+                },
+                ["Manrope-SemiBold.ttf"] = {
+                    "https://raw.githubusercontent.com/sharanda/manrope/master/fonts/ttf/Manrope-SemiBold.ttf",
+                    "https://cdn.jsdelivr.net/gh/sharanda/manrope@master/fonts/ttf/Manrope-SemiBold.ttf",
+                },
+            }
+
+            local function getFontFile(file)
+                local path = OPTIONS.FontDir .. "/fonts/" .. file
+                if isfile(path) then
+                    local ok, data = pcall(readfile, path)
+                    if ok and looksLikeTTF(data) then return path end
+                end
+                for _, u in ipairs(MIRRORS[file] or {}) do
+                    local data = httpGet(u)
+                    if looksLikeTTF(data) then
+                        writefile(path, data)
+                        return path
+                    end
+                end
+            end
+
+            pcall(function()
+                pcall(makefolder, OPTIONS.FontDir)
+                pcall(makefolder, OPTIONS.FontDir .. "/fonts")
+                local med = getFontFile("Manrope-Medium.ttf")
+                if med then
+                    local semi = getFontFile("Manrope-SemiBold.ttf") or med
+                    local json = http_service:JSONEncode({
+                        name = "Manrope",
+                        faces = {
+                            { name = "Medium", weight = 400, style = "normal", assetId = gca(med) },
+                            { name = "SemiBold", weight = 700, style = "normal", assetId = gca(semi) },
+                        },
+                    })
+                    writefile(OPTIONS.FontDir .. "/Manrope.json", json)
+                    local family = gca(OPTIONS.FontDir .. "/Manrope.json")
+                    FONT_REG = Font.new(family, Enum.FontWeight.Regular)
+                    FONT_BOLD = Font.new(family, Enum.FontWeight.Bold)
+                    FONT_NAME = "Manrope"
+                end
+            end)
+        end
+    end
+
+    local Lucide
+    do
+        local ok, lib = pcall(function()
+            return loadstring(game:HttpGet("https://github.com/latte-soft/lucide-roblox/releases/latest/download/lucide-roblox.luau"))()
+        end)
+        if ok and type(lib) == "table" then
+            Lucide = lib
+        end
+    end
+
+    local function applyIcon(img, name)
+        if not Lucide then return end
+        local ok, a = pcall(Lucide.GetAsset, name, 48)
+        if ok and a then
+            img.Image = a.Url
+            img.ImageRectSize = a.ImageRectSize
+            img.ImageRectOffset = a.ImageRectOffset
+        end
+    end
+
+    ----------------------------------------------------------------------
+    -- UI building helpers
+    ----------------------------------------------------------------------
+    local function mk(class, props, parent)
+        local o = Instance.new(class)
+        for k, v in pairs(props) do
+            o[k] = v
+        end
+        o.Parent = parent
+        return o
+    end
+
+    local function tw(obj, t, props)
+        if not CFG.Animations then
+            for k, v in pairs(props) do obj[k] = v end
+            return
+        end
+        tween_service:Create(obj, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+    end
+
+    local accentHooks, glass, corners = {}, {}, {}
+
+    local function onAccent(fn)
+        fn(accentColor())
+        accentHooks[#accentHooks + 1] = fn
+    end
+
+    local function glassify(obj, mult)
+        obj.BackgroundTransparency = CFG.Transparency * mult
+        glass[#glass + 1] = { obj, mult }
+    end
+
+    local function corner(obj, px, scalable)
+        local c = mk("UICorner", { CornerRadius = UDim.new(0, px) }, obj)
+        if scalable then
+            corners[#corners + 1] = { c, px / 30 }
+        end
+        return c
+    end
+
+    local function pill(obj)
+        return mk("UICorner", { CornerRadius = UDim.new(0.5, 0) }, obj)
+    end
+
+    local function lbl(parent, txt, size, color, pos, sz, opts)
+        opts = opts or {}
+        return mk("TextLabel", {
+            Name = opts.name or "Label",
+            BackgroundTransparency = 1,
             BorderSizePixel = 0,
-            Size = UDim2.fromOffset(rowW, 46),
-        }, settingsFrame)
-        corner(row, 14, true)
-        glassify(row, 0.5)
-        lbl(row, name, 17, COL.textOff, UDim2.fromOffset(16, 0), UDim2.fromOffset(120, 46))
-
-        if type == "slider" then
-            local val = lbl(row, "", 16, COL.value, UDim2.fromOffset(rowW - 72, 0), UDim2.fromOffset(56, 46), { align = Enum.TextXAlignment.Right })
-            local function fmt(v) return string.format("%.1f", v) end
-            local sl = makeSlider(row, 140, 23, rowW - 140 - 80, props.min or 0, props.max or 100, props.default or 0, props.step or 1, function(v)
-                val.Text = fmt(v)
-                if props.onChange then props.onChange(v) end
-            end, COL.box)
-            val.Text = fmt(props.default or 0)
-            return sl
-        elseif type == "toggle" then
-            local rsw = makeSwitch(row, UDim2.fromOffset(rowW - 16 - 38, 13), props.default, props.onChange)
-            return rsw
-        elseif type == "dropdown" then
-            local dd = makeDropdown(row, UDim2.fromOffset(rowW - 16 - 150, 5), 150, props.options or {}, props.default, props.multi, props.onChange)
-            return dd
-        elseif type == "colorpicker" then
-            local cp = makeColorpicker(row, UDim2.fromOffset(rowW - 16 - 36, 11), props.default, props.defaultAlpha, props.onChange)
-            return cp
-        elseif type == "keybind" then
-            local kb = makeKeybind(row, UDim2.fromOffset(rowW - 16 - 80, 9), props.default, props.onChange)
-            return kb
-        elseif type == "textbox" then
-            local tb = makeTextbox(row, UDim2.fromOffset(rowW - 16 - 140, 6), 140, props.default, props.placeholder, props.onChange)
-            return tb
-        elseif type == "button" then
-            local btn = makeButton(row, UDim2.fromOffset(rowW - 16 - 100, 5), 100, name, props.confirmation, props.onClick)
-            return btn
-        end
+            Text = txt,
+            TextSize = size,
+            TextColor3 = color,
+            FontFace = opts.bold and FONT_BOLD or FONT_REG,
+            TextXAlignment = opts.align or Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Position = pos,
+            Size = sz,
+        }, parent)
     end
 
-    return cardApi
-end
+    local function isPress(i)
+        return i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch
+    end
 
-----------------------------------------------------------------------
--- makePanelSection (for Players list, Configs list, Shop items)
-----------------------------------------------------------------------
-local function makePanelSection(parentCol, title, isPlayers, onSelection)
-    local W = 410
-    local panel = mk("Frame", {
-        Name = title,
-        BackgroundColor3 = COL.card,
+    local function isMove(i)
+        return i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch
+    end
+
+    local function guiParent()
+        if gethui then
+            local ok, h = pcall(gethui)
+            if ok and h then return h end
+        end
+        local ok = pcall(function() return CoreGui.Name end)
+        if ok then return CoreGui end
+        return local_player:WaitForChild("PlayerGui")
+    end
+
+    ----------------------------------------------------------------------
+    -- ScreenGui & root frames
+    ----------------------------------------------------------------------
+    local gui = mk("ScreenGui", {
+        Name = "ToshibaUI_Juju",
+        ResetOnSpawn = false,
+        DisplayOrder = 9999,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+    }, guiParent())
+
+    local blurFx = mk("BlurEffect", { Name = "ToshibaBlur", Size = 0 }, Lighting)
+
+    local uiScale = mk("UIScale", { Scale = 1 }, gui)
+
+    local holder = mk("Frame", {
+        Name = "WindowHolder",
+        BackgroundTransparency = 1,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(WIN_W, WIN_H),
+    }, gui)
+
+    -- drop shadow
+    local shadow = mk("Frame", { Name = "Shadow", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1) }, holder)
+    for _, e in ipairs({ 6, 12, 20 }) do
+        local f = mk("Frame", {
+            BackgroundColor3 = Color3.new(0, 0, 0),
+            BackgroundTransparency = 0.88,
+            BorderSizePixel = 0,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 10),
+            Size = UDim2.fromOffset(WIN_W + e * 2, WIN_H + e * 2),
+        }, shadow)
+        mk("UICorner", { CornerRadius = UDim.new(0, 30 + e) }, f)
+    end
+
+    local mainFrame = mk("Frame", {
+        Name = "Main",
+        BackgroundColor3 = COL.window,
         BorderSizePixel = 0,
-        Size = UDim2.fromOffset(W, 430),
-    }, parentCol)
-    corner(panel, 22, true)
-    glassify(panel, 1)
+        Size = UDim2.fromScale(1, 1),
+        ZIndex = 2,
+    }, holder)
+    corner(mainFrame, 30, true)
+    glassify(mainFrame, 1)
 
-    local pHead = mk("Frame", {
+    local sidebar = mk("Frame", { Name = "Sidebar", BackgroundTransparency = 1, Size = UDim2.fromOffset(326, WIN_H) }, mainFrame)
+
+    -- profile card
+    do
+        local card = mk("Frame", {
+            Name = "Profile",
+            BackgroundColor3 = Color3.fromRGB(24, 24, 24),
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(26, 745),
+            Size = UDim2.fromOffset(287, 75),
+        }, sidebar)
+        corner(card, 20)
+        local av = mk("ImageLabel", {
+            BackgroundColor3 = Color3.fromRGB(30, 30, 30),
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(9, 13),
+            Size = UDim2.fromOffset(48, 48),
+            Image = local_player and ("rbxthumb://type=AvatarHeadShot&id=" .. local_player.UserId .. "&w=150&h=150") or "",
+        }, card)
+        corner(av, 12)
+        lbl(card, OPTIONS.ProfileName, 17, COL.textOn, UDim2.fromOffset(71, 14), UDim2.fromOffset(200, 22), { bold = true, name = "Name" })
+        lbl(card, OPTIONS.ProfileTag, 12, Color3.fromRGB(100, 100, 100), UDim2.fromOffset(71, 38), UDim2.fromOffset(200, 16), { name = "Tag" })
+    end
+
+    -- header (description + search)
+    local header = mk("Frame", {
         Name = "Header",
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(16, 12),
-        Size = UDim2.fromOffset(W - 32, 42),
-    }, panel)
+        BackgroundColor3 = COL.header,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(336, 12),
+        Size = UDim2.fromOffset(852, 98),
+    }, mainFrame)
+    corner(header, 24, true)
+    glassify(header, 1)
 
-    local titleLbl = lbl(pHead, title, 20, COL.textOn, UDim2.fromOffset(0, 0), UDim2.fromOffset(120, 42), { bold = true })
-    
-    local countBadge = mk("Frame", {
-        Name = "CountBadge",
+    local infoBtn = mk("Frame", {
+        Name = "Info",
+        BackgroundColor3 = Color3.fromRGB(120, 120, 120),
+        BorderSizePixel = 0,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromOffset(47, 49),
+        Size = UDim2.fromOffset(26, 26),
+    }, header)
+    pill(infoBtn)
+    lbl(infoBtn, "i", 17, COL.header, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { bold = true, align = Enum.TextXAlignment.Center })
+
+    local descLabel = lbl(header, "Juju Da Hood | Toshiba UI Reborn", 19, COL.hint, UDim2.fromOffset(81, 0), UDim2.fromOffset(540, 98), { name = "Description" })
+    local function setDesc(t)
+        if t then descLabel.Text = t end
+    end
+
+    local searchWrap = mk("Frame", {
+        Name = "Search",
         BackgroundColor3 = COL.box,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(125, 10),
-        Size = UDim2.fromOffset(36, 22),
-    }, pHead)
-    pill(countBadge)
-    local countLbl = lbl(countBadge, "0", 13, COL.value, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { align = Enum.TextXAlignment.Center, bold = true })
+        Position = UDim2.fromOffset(639, 22),
+        Size = UDim2.fromOffset(191, 54),
+    }, header)
+    corner(searchWrap, 18, true)
+    glassify(searchWrap, 0.5)
 
-    local pSearchWrap = mk("Frame", {
-        Name = "SearchWrap",
-        BackgroundColor3 = COL.box,
-        BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, 0, 0.5, 0),
-        Size = UDim2.fromOffset(150, 34),
-    }, pHead)
-    corner(pSearchWrap, 12, true)
-    glassify(pSearchWrap, 0.5)
-
-    local pSearchBox = mk("TextBox", {
+    local searchBox = mk("TextBox", {
         BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(10, 0),
-        Size = UDim2.fromOffset(108, 34),
+        Position = UDim2.fromOffset(16, 0),
+        Size = UDim2.fromOffset(135, 54),
         Text = "",
         PlaceholderText = "Search...",
         PlaceholderColor3 = Color3.fromRGB(96, 96, 96),
         TextColor3 = Color3.fromRGB(205, 205, 205),
-        TextSize = 14,
+        TextSize = 18,
         FontFace = FONT_REG,
         TextXAlignment = Enum.TextXAlignment.Left,
         ClearTextOnFocus = false,
-    }, pSearchWrap)
+    }, searchWrap)
 
-    local pSearchIcon = mk("ImageLabel", {
-        BackgroundTransparency = 1,
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -8, 0.5, 0),
-        Size = UDim2.fromOffset(16, 16),
-        ImageColor3 = Color3.fromRGB(110, 110, 110),
-    }, pSearchWrap)
-    applyIcon(pSearchIcon, "search")
-
-    mk("Frame", {
-        BackgroundColor3 = COL.line,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(16, 60),
-        Size = UDim2.fromOffset(W - 32, 1),
-    }, panel)
-
-    local listScroll = mk("ScrollingFrame", {
-        Name = "List",
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(12, 68),
-        Size = UDim2.fromOffset(W - 24, 350),
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = COL.track,
-        CanvasSize = UDim2.new(),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ScrollingDirection = Enum.ScrollingDirection.Y,
-    }, panel)
-    scrollers[#scrollers + 1] = listScroll
-
-    mk("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, listScroll)
-
-    local items = {}
-    local selectedItem = nil
-    local selSignal = signal["new"]()
-
-    local function updateCount()
-        countLbl.Text = tostring(#items)
+    do
+        local ic = mk("ImageLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(159, 17),
+            Size = UDim2.fromOffset(20, 20),
+            ImageColor3 = Color3.fromRGB(110, 110, 110),
+        }, searchWrap)
+        applyIcon(ic, "search")
     end
 
-    local function reflowItems()
-        local filter = pSearchBox.Text:lower()
-        for _, it in ipairs(items) do
-            local show = (filter == "") or (it.name:lower():find(filter, 1, true) ~= nil)
-            it.row.Visible = show
-        end
+    local content = mk("Frame", {
+        Name = "Content",
+        BackgroundTransparency = 1,
+        ClipsDescendants = true,
+        Position = UDim2.fromOffset(336, 121),
+        Size = UDim2.fromOffset(830, 705),
+    }, mainFrame)
+
+    ----------------------------------------------------------------------
+    -- notification toast system
+    ----------------------------------------------------------------------
+    local function makeToast(text, type, duration)
+        local color = (type == 1 and COL.success) or (type == 2 and COL.alert) or (type == 3 and COL.error) or accentColor()
+        local iconName = (type == 1 and "check") or (type == 2 and "alert-triangle") or (type == 3 and "alert-circle") or "info"
+
+        local toast = mk("Frame", {
+            Name = "Toast",
+            BackgroundColor3 = COL.window,
+            BorderSizePixel = 0,
+            AnchorPoint = Vector2.new(0.5, 1),
+            Position = UDim2.new(0.5, 0, 1, 60),
+            Size = UDim2.fromOffset(360, 48),
+            ZIndex = 200,
+        }, gui)
+        corner(toast, 14, true)
+        mk("UIStroke", { Color = color, Thickness = 1.5 }, toast)
+
+        local ic = mk("ImageLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(14, 14),
+            Size = UDim2.fromOffset(20, 20),
+            ImageColor3 = color,
+            ZIndex = 201,
+        }, toast)
+        applyIcon(ic, iconName)
+
+        lbl(toast, text, 14, COL.textOn, UDim2.fromOffset(44, 0), UDim2.fromOffset(300, 48), { bold = true })
+
+        tw(toast, 0.25, { Position = UDim2.new(0.5, 0, 1, -20) })
+        task.delay(clamp(duration and typeof(duration) == "number" and duration or 2.5, 1, 7), function()
+            tw(toast, 0.25, { Position = UDim2.new(0.5, 0, 1, 60) })
+            task.delay(0.26, function() toast:Destroy() end)
+        end)
     end
-    pSearchBox:GetPropertyChangedSignal("Text"):Connect(reflowItems)
 
-    local panelObj = {
-        frame = panel,
-        scroll = listScroll,
-        on_selection_change = selSignal,
-        selected = nil,
-    }
+    ----------------------------------------------------------------------
+    -- control primitives
+    ----------------------------------------------------------------------
+    local scrollers = {}
+    local function lockScroll(lock)
+        for _, s in ipairs(scrollers) do s.ScrollingEnabled = not lock end
+    end
 
-    function panelObj:add_item(info)
-        local name = type(info) == "table" and (info.text or info.name) or tostring(info)
-        for _, it in ipairs(items) do
-            if it.name == name then return it end
+    local function makeSwitch(parent, pos, default, onChange)
+        local state = default and true or false
+        local track = mk("TextButton", {
+            Name = "Switch",
+            Text = "",
+            AutoButtonColor = false,
+            BackgroundColor3 = COL.track,
+            BorderSizePixel = 0,
+            Position = pos,
+            Size = UDim2.fromOffset(38, 20),
+        }, parent)
+        pill(track)
+        local knob = mk("Frame", {
+            Name = "Knob",
+            BackgroundColor3 = COL.knob,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(4, 4),
+            Size = UDim2.fromOffset(12, 12),
+        }, track)
+        pill(knob)
+
+        local function paint(animate)
+            local tcol = state and accentColor() or COL.track
+            local kcol = state and Color3.new(1, 1, 1) or COL.knob
+            local kpos = state and UDim2.fromOffset(22, 4) or UDim2.fromOffset(4, 4)
+            if animate then
+                tw(track, 0.18, { BackgroundColor3 = tcol })
+                tw(knob, 0.18, { Position = kpos, BackgroundColor3 = kcol })
+            else
+                track.BackgroundColor3 = tcol
+                knob.Position = kpos
+                knob.BackgroundColor3 = kcol
+            end
+        end
+        paint(false)
+        onAccent(function()
+            if state then track.BackgroundColor3 = accentColor() end
+        end)
+
+        local sw = {}
+        function sw.Set(v, silent)
+            state = v and true or false
+            paint(true)
+            if not silent and onChange then onChange(state) end
+        end
+        function sw.Get() return state end
+        function sw.Toggle() sw.Set(not state) end
+        track.Activated:Connect(sw.Toggle)
+        return sw
+    end
+
+    local function makeSlider(parent, x, cy, w, min, max, default, step, onChange, ringFill)
+        local hit = mk("TextButton", {
+            Name = "Slider",
+            Text = "",
+            AutoButtonColor = false,
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(x, cy - 14),
+            Size = UDim2.fromOffset(w, 28),
+        }, parent)
+        local bar = mk("Frame", {
+            Name = "Bar",
+            BackgroundColor3 = COL.track,
+            BorderSizePixel = 0,
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, 0, 0.5, 0),
+            Size = UDim2.new(1, 0, 0, 3),
+        }, hit)
+        pill(bar)
+        local fill = mk("Frame", { Name = "Fill", BackgroundColor3 = accentColor(), BorderSizePixel = 0, Size = UDim2.new(0, 0, 1, 0) }, bar)
+        pill(fill)
+        onAccent(function(c) fill.BackgroundColor3 = c end)
+        local knob = mk("Frame", {
+            Name = "Knob",
+            BackgroundColor3 = OPTIONS.SliderRing and ringFill or Color3.new(1, 1, 1),
+            BorderSizePixel = 0,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0, 0, 0.5, 0),
+            Size = UDim2.fromOffset(OPTIONS.SliderRing and 13 or 10, OPTIONS.SliderRing and 13 or 10),
+        }, hit)
+        pill(knob)
+        if OPTIONS.SliderRing then
+            mk("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, knob)
         end
 
-        local row = mk("TextButton", {
-            Name = name,
+        local value = default or min
+        local dragging = false
+        local api = {}
+
+        local function setAlpha(a)
+            a = math.clamp(a, 0, 1)
+            fill.Size = UDim2.new(a, 0, 1, 0)
+            knob.Position = UDim2.new(a, 0, 0.5, 0)
+        end
+
+        function api.Set(v, silent)
+            v = math.clamp(v, min, max)
+            if step and step > 0 then
+                v = math.floor((v - min) / step + 0.5) * step + min
+            end
+            value = v
+            setAlpha((max > min) and ((v - min) / (max - min)) or 0)
+            if not silent and onChange then onChange(v) end
+        end
+        function api.Get() return value end
+
+        local function fromInput(pos)
+            local a = (pos.X - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1)
+            api.Set(min + math.clamp(a, 0, 1) * (max - min))
+        end
+
+        hit.InputBegan:Connect(function(i)
+            if isPress(i) then
+                dragging = true
+                lockScroll(true)
+                fromInput(i.Position)
+            end
+        end)
+        connect(user_input_service.InputChanged, function(i)
+            if dragging and isMove(i) then fromInput(i.Position) end
+        end)
+        connect(user_input_service.InputEnded, function(i)
+            if dragging and isPress(i) then
+                dragging = false
+                lockScroll(false)
+            end
+        end)
+
+        api.Set(default or min, true)
+        return api
+    end
+
+    local function makeDropdown(parent, pos, w, options, default, multi, onChange)
+        local state = default or (multi and {} or (options[1] or ""))
+        local open = false
+
+        local btn = mk("TextButton", {
+            Name = "Dropdown",
             Text = "",
             AutoButtonColor = false,
             BackgroundColor3 = COL.box,
             BorderSizePixel = 0,
-            Size = UDim2.fromOffset(W - 24, 48),
-        }, listScroll)
-        corner(row, 12, true)
-        glassify(row, 0.5)
+            Position = pos,
+            Size = UDim2.fromOffset(w, 36),
+        }, parent)
+        corner(btn, 10, true)
+        glassify(btn, 0.5)
 
-        local rowStroke = mk("UIStroke", {
-            Color = accentColor(),
-            Thickness = 1.5,
-            Transparency = 1,
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-        }, row)
-
-        local iconOffset = 10
-        if isPlayers then
-            local targetPlayer = players_service:FindFirstChild(name)
-            local av = mk("ImageLabel", {
-                Name = "Avatar",
-                BackgroundColor3 = Color3.fromRGB(30, 30, 30),
-                BorderSizePixel = 0,
-                Position = UDim2.fromOffset(8, 8),
-                Size = UDim2.fromOffset(32, 32),
-                Image = targetPlayer and ("rbxthumb://type=AvatarHeadShot&id=" .. targetPlayer.UserId .. "&w=100&h=100&filters=0") or "",
-            }, row)
-            pill(av)
-            iconOffset = 48
-        else
-            local ic = mk("ImageLabel", {
-                Name = "Icon",
-                BackgroundTransparency = 1,
-                Position = UDim2.fromOffset(12, 14),
-                Size = UDim2.fromOffset(20, 20),
-                ImageColor3 = COL.hint,
-            }, row)
-            applyIcon(ic, "file-text")
-            iconOffset = 40
-        end
-
-        local nameLabel = lbl(row, name, 16, COL.textOff, UDim2.fromOffset(iconOffset, 6), UDim2.fromOffset(W - 24 - iconOffset - 80, 20), { bold = true })
-        local subLabel = lbl(row, isPlayers and ("@" .. name) or "Item", 12, COL.hint, UDim2.fromOffset(iconOffset, 26), UDim2.fromOffset(W - 24 - iconOffset - 80, 16))
-
-        local badge = mk("Frame", {
-            Name = "Badge",
-            BackgroundColor3 = COL.track,
-            BorderSizePixel = 0,
+        local txt = lbl(btn, "", 14, COL.textOn, UDim2.fromOffset(12, 0), UDim2.fromOffset(w - 38, 36))
+        local chev = mk("ImageLabel", {
+            Name = "Arrow",
+            BackgroundTransparency = 1,
             AnchorPoint = Vector2.new(1, 0.5),
-            Position = UDim2.new(1, -12, 0.5, 0),
-            Size = UDim2.fromOffset(60, 22),
-            Visible = false,
-        }, row)
-        pill(badge)
-        local badgeText = lbl(badge, "", 11, COL.textOn, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { align = Enum.TextXAlignment.Center, bold = true })
+            Position = UDim2.new(1, -10, 0.5, 0),
+            Size = UDim2.fromOffset(16, 16),
+            ImageColor3 = COL.hint,
+        }, btn)
+        applyIcon(chev, "chevron-down")
 
-        local itEntry = {
-            name = name,
-            row = row,
-            stroke = rowStroke,
-            nameLabel = nameLabel,
-            subLabel = subLabel,
-            badge = badge,
-            badgeText = badgeText,
-        }
-        items[#items + 1] = itEntry
-        updateCount()
-
-        local function setSelected(sel)
-            if sel then
-                if selectedItem and selectedItem ~= itEntry then
-                    tw(selectedItem.row, 0.15, { BackgroundColor3 = COL.box })
-                    tw(selectedItem.stroke, 0.15, { Transparency = 1 })
-                    tw(selectedItem.nameLabel, 0.15, { TextColor3 = COL.textOff })
+        local function getDisplay()
+            if multi then
+                local t = {}
+                for k, v in pairs(state) do
+                    if v then t[#t + 1] = tostring(k) end
                 end
-                selectedItem = itEntry
-                panelObj.selected = { name = name }
-                tw(row, 0.15, { BackgroundColor3 = COL.track })
-                tw(rowStroke, 0.15, { Transparency = 0 })
-                tw(nameLabel, 0.15, { TextColor3 = COL.textOn })
-                selSignal:Fire(name)
-                if onSelection then onSelection(name) end
+                return #t > 0 and table.concat(t, ", ") or "None"
             else
-                tw(row, 0.15, { BackgroundColor3 = COL.box })
-                tw(rowStroke, 0.15, { Transparency = 1 })
-                tw(nameLabel, 0.15, { TextColor3 = COL.textOff })
-                if selectedItem == itEntry then
-                    selectedItem = nil
-                    panelObj.selected = nil
-                    selSignal:Fire(nil)
+                return tostring(state)
+            end
+        end
+        txt.Text = getDisplay()
+
+        local list = mk("Frame", {
+            Name = "List",
+            BackgroundColor3 = Color3.fromRGB(32, 32, 32),
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            Position = UDim2.fromOffset(pos.X.Offset, pos.Y.Offset + 40),
+            Size = UDim2.fromOffset(w, 0),
+            ZIndex = 50,
+            Visible = false,
+        }, parent)
+        corner(list, 10, true)
+        mk("UIStroke", { Color = COL.line, Thickness = 1 }, list)
+        mk("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+
+        local totalH = 4 + #options * 32
+        for idx, opt in ipairs(options) do
+            local optBtn = mk("TextButton", {
+                Name = tostring(opt),
+                LayoutOrder = idx,
+                Text = "",
+                AutoButtonColor = false,
+                BackgroundTransparency = 1,
+                Size = UDim2.fromOffset(w, 30),
+                ZIndex = 51,
+            }, list)
+            local optLbl = lbl(optBtn, tostring(opt), 14, COL.textOff, UDim2.fromOffset(12, 0), UDim2.fromOffset(w - 40, 30))
+            optLbl.ZIndex = 52
+            local check = mk("ImageLabel", {
+                Name = "Check",
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -10, 0.5, 0),
+                Size = UDim2.fromOffset(14, 14),
+                ImageColor3 = accentColor(),
+                Visible = multi and (state[opt] == true) or (state == opt),
+                ZIndex = 52,
+            }, optBtn)
+            applyIcon(check, "check")
+
+            optBtn.Activated:Connect(function()
+                if multi then
+                    state[opt] = not state[opt]
+                    check.Visible = state[opt]
+                    txt.Text = getDisplay()
+                    if onChange then onChange(state) end
+                else
+                    state = opt
+                    txt.Text = getDisplay()
+                    open = false
+                    tw(chev, 0.2, { Rotation = 0 })
+                    tw(list, 0.2, { Size = UDim2.fromOffset(w, 0) })
+                    task.delay(0.2, function() list.Visible = false end)
+                    if onChange then onChange({ opt }) end
                 end
-            end
+            end)
         end
 
-        row.Activated:Connect(function() setSelected(true) end)
-        return itEntry
+        btn.Activated:Connect(function()
+            open = not open
+            tw(chev, 0.2, { Rotation = open and 180 or 0 })
+            if open then
+                list.Visible = true
+                tw(list, 0.2, { Size = UDim2.fromOffset(w, totalH) })
+            else
+                tw(list, 0.2, { Size = UDim2.fromOffset(w, 0) })
+                task.delay(0.2, function() list.Visible = false end)
+            end
+        end)
+
+        local ddObj = {}
+        function ddObj.Set(val, silent)
+            state = val
+            txt.Text = getDisplay()
+            if not silent and onChange then onChange(multi and state or { state }) end
+        end
+        function ddObj.Get() return state end
+        return ddObj
     end
 
-    function panelObj:remove_item(text)
-        for i = #items, 1, -1 do
-            if items[i].name == text then
-                local it = items[i]
-                table.remove(items, i)
-                if selectedItem == it then
-                    selectedItem = nil
-                    panelObj.selected = nil
+    local function makeColorpicker(parent, pos, defaultColor, defaultAlpha, onChange)
+        local curCol = defaultColor or Color3.fromRGB(255, 255, 255)
+        local curAlpha = defaultAlpha or 0
+        local open = false
+
+        local preview = mk("TextButton", {
+            Name = "ColorPreview",
+            Text = "",
+            AutoButtonColor = false,
+            BackgroundColor3 = curCol,
+            BorderSizePixel = 0,
+            Position = pos,
+            Size = UDim2.fromOffset(36, 24),
+        }, parent)
+        corner(preview, 8, true)
+        mk("UIStroke", { Color = Color3.fromRGB(60, 60, 60), Thickness = 1.5 }, preview)
+
+        local pop = mk("Frame", {
+            Name = "ColorPopup",
+            BackgroundColor3 = Color3.fromRGB(28, 28, 28),
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(pos.X.Offset - 160, pos.Y.Offset + 30),
+            Size = UDim2.fromOffset(200, 180),
+            ZIndex = 60,
+            Visible = false,
+        }, parent)
+        corner(pop, 14, true)
+        mk("UIStroke", { Color = COL.line, Thickness = 1 }, pop)
+
+        local rVal, gVal, bVal = math.floor(curCol.R * 255), math.floor(curCol.G * 255), math.floor(curCol.B * 255)
+        local aVal = math.floor(curAlpha * 100)
+
+        local function updateColor()
+            curCol = Color3.fromRGB(rVal, gVal, bVal)
+            curAlpha = aVal / 100
+            preview.BackgroundColor3 = curCol
+            if onChange then onChange(curCol, curAlpha) end
+        end
+
+        local labels = { "R", "G", "B", "A" }
+        local vals = { rVal, gVal, bVal, aVal }
+        local maxs = { 255, 255, 255, 100 }
+
+        for i = 1, 4 do
+            local y = 14 + (i - 1) * 38
+            lbl(pop, labels[i], 13, COL.hint, UDim2.fromOffset(12, y), UDim2.fromOffset(16, 24), { bold = true })
+            local vLbl = lbl(pop, tostring(vals[i]), 13, COL.value, UDim2.fromOffset(160, y), UDim2.fromOffset(30, 24), { align = Enum.TextXAlignment.Right })
+            makeSlider(pop, 36, y + 12, 115, 0, maxs[i], vals[i], 1, function(v)
+                vLbl.Text = tostring(math.floor(v))
+                if i == 1 then rVal = math.floor(v)
+                elseif i == 2 then gVal = math.floor(v)
+                elseif i == 3 then bVal = math.floor(v)
+                elseif i == 4 then aVal = math.floor(v) end
+                updateColor()
+            end, COL.box)
+        end
+
+        preview.Activated:Connect(function()
+            open = not open
+            pop.Visible = open
+        end)
+
+        local cpObj = {}
+        function cpObj.Set(c, a, silent)
+            if c then curCol = c; preview.BackgroundColor3 = curCol end
+            if a then curAlpha = a end
+            if not silent and onChange then onChange(curCol, curAlpha) end
+        end
+        function cpObj.Get() return curCol, curAlpha end
+        return cpObj
+    end
+
+    local function makeKeybind(parent, pos, defaultKey, onChange)
+        local curKey = defaultKey or Enum.KeyCode.Unknown
+        local listening = false
+
+        local btn = mk("TextButton", {
+            Name = "Keybind",
+            Text = "",
+            AutoButtonColor = false,
+            BackgroundColor3 = COL.box,
+            BorderSizePixel = 0,
+            Position = pos,
+            Size = UDim2.fromOffset(80, 28),
+        }, parent)
+        corner(btn, 8, true)
+        local kLbl = lbl(btn, "", 13, COL.value, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { align = Enum.TextXAlignment.Center, bold = true })
+
+        local function updateDisplay()
+            local name = typeof(curKey) == "EnumItem" and curKey.Name or tostring(curKey or "None")
+            kLbl.Text = "[ " .. name .. " ]"
+            kLbl.TextColor3 = COL.value
+        end
+        updateDisplay()
+
+        btn.Activated:Connect(function()
+            if listening then return end
+            listening = true
+            kLbl.Text = "[ ... ]"
+            kLbl.TextColor3 = accentColor()
+
+            local conn
+            conn = user_input_service.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.Backspace then
+                        curKey = Enum.KeyCode.Unknown
+                    else
+                        curKey = input.KeyCode
+                    end
+                    conn:Disconnect()
+                    listening = false
+                    updateDisplay()
+                    if onChange then onChange(curKey) end
+                elseif input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 or input.UserInputType == Enum.UserInputType.MouseButton3 then
+                    curKey = input.UserInputType
+                    conn:Disconnect()
+                    listening = false
+                    updateDisplay()
+                    if onChange then onChange(curKey) end
                 end
-                tw(it.row, 0.18, { Size = UDim2.fromOffset(W - 24, 0), BackgroundTransparency = 1 })
-                task.delay(0.2, function() it.row:Destroy() end)
-                updateCount()
-                break
-            end
+            end)
+        end)
+
+        local kbObj = {}
+        function kbObj.Set(k, silent)
+            curKey = k
+            updateDisplay()
+            if not silent and onChange then onChange(curKey) end
         end
+        function kbObj.Get() return curKey end
+        return kbObj
     end
 
-    function panelObj:select_item(text)
-        for _, it in ipairs(items) do
-            if it.name == text then
-                panelObj:add_item(text)
-                it.row.Activated:Fire()
-                break
-            end
+    local function makeTextbox(parent, pos, w, defaultText, placeholder, onChange)
+        local wrap = mk("Frame", {
+            Name = "TextboxWrap",
+            BackgroundColor3 = COL.box,
+            BorderSizePixel = 0,
+            Position = pos,
+            Size = UDim2.fromOffset(w, 34),
+        }, parent)
+        corner(wrap, 10, true)
+        glassify(wrap, 0.5)
+
+        local box = mk("TextBox", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(10, 0),
+            Size = UDim2.fromOffset(w - 20, 34),
+            Text = defaultText or "",
+            PlaceholderText = placeholder or "Enter text...",
+            PlaceholderColor3 = COL.hint,
+            TextColor3 = COL.textOn,
+            TextSize = 14,
+            FontFace = FONT_REG,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+        }, wrap)
+
+        box.FocusLost:Connect(function()
+            if onChange then onChange(box.Text) end
+        end)
+
+        local tbObj = {}
+        function tbObj.Set(t, silent)
+            box.Text = tostring(t or "")
+            if not silent and onChange then onChange(box.Text) end
         end
+        function tbObj.Get() return box.Text end
+        return tbObj
     end
 
-    function panelObj:edit_item_color(text, color)
-        for _, it in ipairs(items) do
-            if it.name == text then
-                it.badge.Visible = true
-                it.badge.BackgroundColor3 = color
-                break
+    local function makeButton(parent, pos, w, text, confirmation, onClick)
+        local confirmed = false
+        local btn = mk("TextButton", {
+            Name = "Button",
+            Text = "",
+            AutoButtonColor = false,
+            BackgroundColor3 = COL.box,
+            BorderSizePixel = 0,
+            Position = pos,
+            Size = UDim2.fromOffset(w, 36),
+        }, parent)
+        corner(btn, 10, true)
+        glassify(btn, 0.5)
+
+        local bLbl = lbl(btn, text, 14, COL.textOn, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { align = Enum.TextXAlignment.Center, bold = true })
+
+        btn.MouseEnter:Connect(function() tw(btn, 0.15, { BackgroundColor3 = COL.track }) end)
+        btn.MouseLeave:Connect(function()
+            tw(btn, 0.15, { BackgroundColor3 = COL.box })
+            if confirmed then
+                confirmed = false
+                bLbl.Text = text
+                bLbl.TextColor3 = COL.textOn
             end
-        end
-    end
+        end)
 
-    function panelObj:add_icon(text, icon)
-        for _, it in ipairs(items) do
-            if it.name == text then
-                it.badge.Visible = true
-                it.badgeText.Text = tostring(icon)
-                break
+        btn.Activated:Connect(function()
+            if confirmation and not confirmed then
+                confirmed = true
+                bLbl.Text = "Confirm?"
+                bLbl.TextColor3 = accentColor()
+                task.delay(3, function()
+                    if confirmed then
+                        confirmed = false
+                        bLbl.Text = text
+                        bLbl.TextColor3 = COL.textOn
+                    end
+                end)
+                return
             end
-        end
+            confirmed = false
+            bLbl.Text = text
+            bLbl.TextColor3 = COL.textOn
+            if onClick then onClick() end
+        end)
+
+        return btn
     end
 
-    function panelObj:remove_icon(text, icon)
-        for _, it in ipairs(items) do
-            if it.name == text then
-                it.badge.Visible = false
-                break
-            end
-        end
-    end
-
-    function panelObj:update_position() end
-
-    return panelObj
-end
-
-----------------------------------------------------------------------
--- Tabs definition & page containers
-----------------------------------------------------------------------
-local TAB_DEFS = {
-    { id = "ragebot", name = "Ragebot", icon = "crosshair", y = 170, hint = "Ragebot targeting, hitboxes & desync" },
-    { id = "legitbot", name = "Legitbot", icon = "target", y = 230, hint = "Legit aim assist, silent aim & triggerbot" },
-    { id = "visuals", name = "Visuals", icon = "eye", y = 290, hint = "World visuals, lighting & hud modifications" },
-    { id = "esp", name = "Player ESP", icon = "user-check", y = 350, hint = "Player ESP boxes, tracers, health & chams" },
-    { id = "skins", name = "Skins", icon = "sparkles", y = 410, hint = "Skin changer and custom textures" },
-    { id = "movement", name = "Movement", icon = "chevrons-right", y = 470, hint = "Speed, fly, anti-slow & movement physics" },
-    { id = "players", name = "Players", icon = "users", y = 530, hint = "Player list, statuses, telemetry & interactions" },
-    { id = "shop", name = "Shop", icon = "shopping-bag", y = 590, hint = "Da Hood automated shop & ammo buyer" },
-    { id = "configs", name = "Configs", icon = "folder", y = 650, hint = "Config manager, profiles & addons" },
-    { id = "settings", name = "Settings", icon = "sliders", y = 710, hint = "Interface scaling, glass blur, accent & keybinds", settings = true },
-}
-
-local SECTIONS = {
-    { "COMBAT", 138, 88 },
-    { "VISUALS", 262, 88 },
-    { "MISC", 442, 88 },
-    { "SYSTEM", 622, 88 },
-}
-
-for _, s in ipairs(SECTIONS) do
-    mk("Frame", { BackgroundColor3 = COL.line, BorderSizePixel = 0, Position = UDim2.fromOffset(25, s[2]), Size = UDim2.fromOffset(14, 1) }, sidebar)
-    lbl(sidebar, s[1], 13, COL.label, UDim2.fromOffset(45, s[2] - 10), UDim2.fromOffset(120, 20), { name = "Section" })
-    mk("Frame", { BackgroundColor3 = COL.line, BorderSizePixel = 0, Position = UDim2.fromOffset(s[3], s[2]), Size = UDim2.fromOffset(290 - s[3], 1) }, sidebar)
-end
-
-local tabPages = {}
-local currentTab = nil
-
-local function newColumn(scroll, x, w)
-    local col = mk("Frame", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(x, 0),
-        Size = UDim2.fromOffset(w, 0),
-        AutomaticSize = Enum.AutomaticSize.Y,
-    }, scroll)
-    mk("UIListLayout", { Padding = UDim.new(0, 16), SortOrder = Enum.SortOrder.LayoutOrder }, col)
-    mk("Frame", { Name = "Pad", LayoutOrder = 9999, BackgroundTransparency = 1, Size = UDim2.fromOffset(w, 8) }, col)
-    return col
-end
-
-local function selectTab(def)
-    if currentTab == def then return end
-    currentTab = def
-    for _, d in ipairs(TAB_DEFS) do
-        local on = d == def
-        tw(d.btn, 0.2, { BackgroundTransparency = on and 0 or 1 })
-        tw(d.txt, 0.2, { TextColor3 = on and COL.textOn or COL.tabOff })
-        tw(d.ico, 0.2, { ImageColor3 = on and accentColor() or COL.tabOff })
-        d.page.scroll.Visible = on
-    end
-    searchBox.Text = ""
-    setDesc(def.hint)
-end
-
-for _, def in ipairs(TAB_DEFS) do
-    local scroll = mk("ScrollingFrame", {
-        Name = def.name,
-        Active = true,
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ScrollBarThickness = 2,
-        ScrollBarImageColor3 = COL.track,
-        CanvasSize = UDim2.new(),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ScrollingDirection = Enum.ScrollingDirection.Y,
-        Size = UDim2.fromOffset(830, 705),
-        Visible = false,
-    }, content)
-    scrollers[#scrollers + 1] = scroll
-
-    local page = { scroll = scroll, cards = {} }
-    page.left = newColumn(scroll, 0, 410)
-    page.right = newColumn(scroll, 420, 410)
-    def.page = page
-    tabPages[def.id] = def
-
-    local btn = mk("TextButton", {
-        Name = def.name,
-        Text = "",
-        AutoButtonColor = false,
-        BackgroundColor3 = COL.tabSel,
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(24, def.y - 25),
-        Size = UDim2.fromOffset(286, 48),
-    }, sidebar)
-    corner(btn, 14, true)
-    def.btn = btn
-    def.txt = lbl(btn, def.name, 18, COL.tabOff, UDim2.fromOffset(21, 0), UDim2.fromOffset(180, 48), { name = "Text" })
-    def.ico = mk("ImageLabel", {
-        Name = "Icon",
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(252, 14),
-        Size = UDim2.fromOffset(20, 20),
-        ImageColor3 = COL.tabOff,
-    }, btn)
-    applyIcon(def.ico, def.icon)
-    btn.Activated:Connect(function() selectTab(def) end)
-end
-
-----------------------------------------------------------------------
--- global scale & appearance
-----------------------------------------------------------------------
-local function applyScale()
-    local vp = gui.AbsoluteSize
-    if vp.X <= 0 or vp.Y <= 0 then return end
-    uiScale.Scale = math.min(vp.X * 0.9 / WIN_W, vp.Y * 0.9 / WIN_H) * CFG.Scale
-end
-
-local function applyGlass()
-    for _, g in ipairs(glass) do
-        g[1].BackgroundTransparency = math.clamp(CFG.Transparency * g[2], 0, 1)
-    end
-    shadow.Visible = CFG.Transparency < 0.05
-end
-
-local function applyCorners()
-    for _, c in ipairs(corners) do
-        c[1].CornerRadius = UDim.new(0, math.floor(CFG.Rounding * c[2] + 0.5))
-    end
-end
-
-local function applyAccent()
-    local c = accentColor()
-    for _, fn in ipairs(accentHooks) do fn(c) end
-    if currentTab then currentTab.ico.ImageColor3 = c end
-end
-
-local function applyBlur()
-    blurFx.Size = holder.Visible and CFG.Blur or 0
-end
-
-local function buildSettingsTab()
-    local page = tabPages["settings"].page
-    local col = page.left
-
-    local function addSliderCard(name, min, max, def, step, fmt, onChange)
+    ----------------------------------------------------------------------
+    -- makeCard (with ENLARGED 26x26 chevron & expandable settings)
+    ----------------------------------------------------------------------
+    local function makeCard(parentCol, name, opts)
+        opts = opts or {}
+        local W = opts.full and 830 or 410
         local card = mk("Frame", {
             Name = name,
             BackgroundColor3 = COL.card,
             BorderSizePixel = 0,
-            Size = UDim2.fromOffset(410, 70),
-        }, col)
+            ClipsDescendants = true,
+            Size = UDim2.fromOffset(W, 70),
+        }, parentCol)
         corner(card, 22, true)
         glassify(card, 1)
-        lbl(card, name, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(150, 70))
-        local val = lbl(card, fmt(def), 16, COL.value, UDim2.fromOffset(340, 0), UDim2.fromOffset(50, 70), { align = Enum.TextXAlignment.Right })
-        makeSlider(card, 180, 35, 150, min, max, def, step, function(v)
-            val.Text = fmt(v)
-            onChange(v)
-        end, COL.box)
-    end
 
-    addSliderCard("Scale", 60, 110, 100, 1, function(v) return v .. "%" end, function(v)
-        CFG.Scale = v / 100
-        applyScale()
-    end)
-    addSliderCard("Transparency", 0, 85, 0, 1, function(v) return v .. "%" end, function(v)
-        CFG.Transparency = v / 100
-        applyGlass()
-    end)
-    addSliderCard("Blur", 0, 40, 0, 1, function(v) return tostring(v) end, function(v)
-        CFG.Blur = v
-        applyBlur()
-    end)
-    addSliderCard("Rounding", 12, 40, 30, 1, function(v) return v .. "px" end, function(v)
-        CFG.Rounding = v
-        applyCorners()
-    end)
-    addSliderCard("Accent Hue", 0, 360, 263, 1, function(v) return v .. "°" end, function(v)
-        CFG.Hue = v / 360
-        applyAccent()
-    end)
-
-    makeCard(page.right, "Animations", {
-        default = true,
-        desc = "Smooth interface tween animations",
-        onChange = function(on) CFG.Animations = on end,
-    })
-end
-
-buildSettingsTab()
-
-----------------------------------------------------------------------
--- drag window & toggle button
-----------------------------------------------------------------------
-do
-    local dragging, origin, startCenter = false, nil, nil
-    header.InputBegan:Connect(function(i)
-        if isPress(i) then
-            dragging = true
-            origin = Vector2.new(i.Position.X, i.Position.Y)
-            startCenter = holder.AbsolutePosition + holder.AbsoluteSize / 2
-        end
-    end)
-    connect(user_input_service.InputChanged, function(i)
-        if dragging and isMove(i) then
-            local c = startCenter + (Vector2.new(i.Position.X, i.Position.Y) - origin)
-            local vp = gui.AbsoluteSize
-            holder.Position = UDim2.fromScale(math.clamp(c.X / vp.X, 0.05, 0.95), math.clamp(c.Y / vp.Y, 0.05, 0.95))
-        end
-    end)
-    connect(user_input_service.InputEnded, function(i)
-        if dragging and isPress(i) then dragging = false end
-    end)
-end
-
-local function setOpen(v)
-    holder.Visible = v
-    applyBlur()
-end
-
-local fab = mk("ImageButton", {
-    Name = "OpenButton",
-    AutoButtonColor = false,
-    BackgroundColor3 = COL.window,
-    BorderSizePixel = 0,
-    AnchorPoint = Vector2.new(0.5, 0),
-    Position = UDim2.new(0.5, 0, 0, 10),
-    Size = UDim2.fromOffset(40, 40),
-}, gui)
-corner(fab, 14)
-do
-    local ic = mk("ImageLabel", {
-        BackgroundTransparency = 1,
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(20, 20),
-    }, fab)
-    applyIcon(ic, "menu")
-    onAccent(function(c) ic.ImageColor3 = c end)
-end
-fab.Activated:Connect(function() setOpen(not holder.Visible) end)
-
-connect(user_input_service.InputBegan, function(i, gp)
-    if not gp and i.KeyCode == OPTIONS.ToggleKey then
-        setOpen(not holder.Visible)
-    end
-end)
-
-connect(gui:GetPropertyChangedSignal("AbsoluteSize"), applyScale)
-applyScale()
-applyGlass()
-applyCorners()
-selectTab(TAB_DEFS[1])
-
-----------------------------------------------------------------------
--- File system & config encryption
-----------------------------------------------------------------------
-if not isfolder("juju recode") then makefolder("juju recode") end
-if not isfolder("juju recode/configs") then makefolder("juju recode/configs") end
-if not isfolder("juju recode/addons") then makefolder("juju recode/addons") end
-if not isfolder("juju recode/custom") then makefolder("juju recode/custom") end
-if not isfolder("juju recode/themes") then makefolder("juju recode/themes") end
-
-local function to_base64(input)
-    local charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    local encoded = ""
-    local padding = 0
-    local rem = #input % 3
-    if rem > 0 then
-        for _ = 1, 3 - rem do
-            input = input .. "\0"
-            padding = padding + 1
-        end
-    end
-    for i = 1, #input, 3 do
-        local a, b, c = string.byte(input, i, i + 2)
-        local n = a * 65536 + (b or 0) * 256 + (c or 0)
-        encoded = encoded .. string.sub(charset, math.floor(n / 262144) % 64 + 1, math.floor(n / 262144) % 64 + 1)
-        encoded = encoded .. string.sub(charset, math.floor(n / 4096) % 64 + 1, math.floor(n / 4096) % 64 + 1)
-        encoded = encoded .. string.sub(charset, math.floor(n / 64) % 64 + 1, math.floor(n / 64) % 64 + 1)
-        encoded = encoded .. string.sub(charset, n % 64 + 1, n % 64 + 1)
-    end
-    return string.sub(encoded, 1, #encoded - padding) .. string.rep("=", padding)
-end
-
-local function from_base64(input)
-    local charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    local decoded = ""
-    input = string.gsub(input, "=", "")
-    for i = 1, #input, 4 do
-        local a = (string.find(charset, string.sub(input, i, i)) or 1) - 1
-        local b = (string.find(charset, string.sub(input, i + 1, i + 1)) or 1) - 1
-        local c = (string.find(charset, string.sub(input, i + 2, i + 2)) or 1) - 1
-        local d = (string.find(charset, string.sub(input, i + 3, i + 3)) or 1) - 1
-        local n = a * 262144 + b * 4096 + c * 64 + d
-        decoded = decoded .. string.char(math.floor(n / 65536) % 256)
-        decoded = decoded .. string.char(math.floor(n / 256) % 256)
-        decoded = decoded .. string.char(n % 256)
-    end
-    return string.gsub(decoded, "%z", "")
-end
-
-local function xor_crypt(input, key)
-    local output = {}
-    for i = 1, #input do
-        local key_byte = string.byte(key, (i - 1) % #key + 1)
-        local xored = bit32.bxor(string.byte(input, i), key_byte)
-        table.insert(output, string.char(xored))
-    end
-    return table.concat(output)
-end
-
-local function encrypt(input, key)
-    local salt = tostring(math_random(1000, 9999))
-    input = salt .. input .. string.reverse(salt)
-    return to_base64(xor_crypt(input, key))
-end
-
-local function decrypt(input, key)
-    local decoded = from_base64(input)
-    local xored = xor_crypt(decoded, key)
-    return string.sub(xored, 5, -5)
-end
-
-----------------------------------------------------------------------
--- Juju Menu Object & Adapter
-----------------------------------------------------------------------
-local active_binds = {}
-local registered_elements = {}
-
-local menu = {
-    colors = COL,
-    accent = accentColor(),
-    groups = {},
-    notifications = {},
-    on_config_loaded = signal["new"](),
-    settings = {},
-    autoload = nil,
-    did_action = false,
-    theme = "",
-    saved = true,
-}
-
-function menu.is_menu_open()
-    return holder.Visible
-end
-
-function menu.update_layout() end
-
-function menu.set_accent_color(color)
-    if typeof(color) == "Color3" then
-        local h, s, v = color:ToHSV()
-        CFG.Hue = h
-        applyAccent()
-    end
-end
-
-function menu.new_notification(text, type, time, data)
-    makeToast(text, type, time)
-end
-
-function menu.get_config_list()
-    local list = {}
-    local files = listfiles("juju recode/configs/")
-    for _, file in ipairs(files) do
-        if file:match("%.cfg$") then
-            local fname = file:match("([^/\\]+)%.cfg$")
-            if fname then list[#list + 1] = fname end
-        end
-    end
-    return list
-end
-
-function menu.get_addon_list()
-    local list = {}
-    local files = listfiles("juju recode/addons/")
-    for _, file in ipairs(files) do
-        if file:match("%.luau$") then
-            local fname = file:match("([^/\\]+)%.luau$")
-            if fname then list[#list + 1] = fname end
-        end
-    end
-    return list
-end
-
-function menu.get_skins_list()
-    local list = {}
-    local files = listfiles("juju recode/custom/")
-    for _, file in ipairs(files) do
-        if file:match("%.skin$") then
-            local fname = file:match("([^/\\]+)%.skin$")
-            if fname then list[#list + 1] = fname end
-        end
-    end
-    return list
-end
-
-function menu.get_theme_list()
-    local list = {}
-    local files = listfiles("juju recode/themes/")
-    for _, file in ipairs(files) do
-        if file:match("%.th$") then
-            local fname = file:match("([^/\\]+)%.th$")
-            if fname then list[#list + 1] = fname end
-        end
-    end
-    return list
-end
-
-function menu.save_config(name)
-    if not name or name:find("[/\\%.]") then return end
-    local cfg = {
-        author = flags["author"] or "Idris",
-        date = os.date("%x"),
-    }
-    for flag, val in pairs(flags) do
-        if flag:sub(1, 1) ~= "!" then
-            if typeof(val) == "Color3" then
-                cfg[flag] = { math.floor(val.R * 255), math.floor(val.G * 255), math.floor(val.B * 255) }
-            elseif typeof(val) == "EnumItem" then
-                cfg[flag] = val.Name
-            else
-                cfg[flag] = val
-            end
-        end
-    end
-    writefile("juju recode/configs/" .. name .. ".cfg", encrypt(http_service:JSONEncode(cfg), "^^^^^^^^^^^^^^^^^^^^"))
-    menu.new_notification("saved config " .. name, 1)
-end
-
-function menu.get_config_data(data)
-    local ok, decrypted = pcall(decrypt, data, "^^^^^^^^^^^^^^^^^^^^")
-    if ok and decrypted then
-        local ok2, json = pcall(function() return http_service:JSONDecode(decrypted) end)
-        if ok2 then return json end
-    end
-end
-
-function menu.load_config(name)
-    if not name or name:find("[/\\%.]") then return end
-    local path = "juju recode/configs/" .. name .. ".cfg"
-    if isfile(path) then
-        local cfg = menu.get_config_data(readfile(path))
-        if cfg then
-            for k, v in pairs(cfg) do
-                if k ~= "author" and k ~= "date" and k ~= "keybinds" then
-                    if type(v) == "table" and #v == 3 and type(v[1]) == "number" then
-                        flags[k] = Color3.fromRGB(v[1], v[2], v[3])
-                    else
-                        flags[k] = v
-                    end
-                end
-            end
-            for _, el in ipairs(registered_elements) do
-                if el.toggle_flag and flags[el.toggle_flag] ~= nil then
-                    el:set_toggle(flags[el.toggle_flag])
-                end
-                if el.slider_flag and flags[el.slider_flag] ~= nil then
-                    el:set_slider(flags[el.slider_flag])
-                end
-                if el.dropdown_flag and flags[el.dropdown_flag] ~= nil then
-                    el:set_dropdown(flags[el.dropdown_flag], true, true)
-                end
-                if el.color_flag and flags[el.color_flag] ~= nil then
-                    el:set_colorpicker(flags[el.color_flag])
-                end
-            end
-            menu.on_config_loaded:Fire()
-            menu.new_notification("loaded config " .. name, 1)
-        end
-    end
-end
-
-function menu.show_bind(keybind, just_visual)
-    active_binds[#active_binds + 1] = keybind
-end
-
-function menu.hide_bind(keybind, just_visual)
-    for i = #active_binds, 1, -1 do
-        if active_binds[i] == keybind then
-            table.remove(active_binds, i)
-            break
-        end
-    end
-end
-
-function menu.get_active_binds()
-    return active_binds
-end
-
-function menu:show_keybinds() end
-function menu:hide_keybinds() end
-function menu:load_theme(th) end
-
-----------------------------------------------------------------------
--- Group / Tab / Section mapping to ToshibaUI
-----------------------------------------------------------------------
-local function resolvePage(group_name, tab_name)
-    group_name = (group_name or ""):lower()
-    tab_name = (tab_name or ""):lower()
-
-    if group_name == "main" then
-        if tab_name == "ragebot" then return tabPages["ragebot"].page end
-        if tab_name == "legitbot" then return tabPages["legitbot"].page end
-    elseif group_name == "visuals" then
-        if tab_name == "general" then return tabPages["visuals"].page end
-        if tab_name == "players" then return tabPages["esp"].page end
-        if tab_name == "skins" then return tabPages["skins"].page end
-    elseif group_name == "misc." or group_name == "misc" then
-        if tab_name == "main" then return tabPages["movement"].page end
-        if tab_name == "players" then return tabPages["players"].page end
-        if tab_name == "shop" then return tabPages["shop"].page end
-        if tab_name == "configs" then return tabPages["configs"].page end
-        if tab_name == "addons" then return tabPages["configs"].page end
-    end
-
-    if tabPages[tab_name] then
-        return tabPages[tab_name].page
-    end
-    return tabPages["configs"].page
-end
-
-function menu.create_group(name)
-    local grp = {
-        name = name,
-        tabs = {},
-    }
-
-    function grp:create_tab(tab_name)
-        grp.tabs[tab_name] = {
-            name = tab_name,
-            sections = {},
-        }
-        return grp.tabs[tab_name]
-    end
-
-    function grp:hide() end
-    function grp:show() end
-
-    function grp:create_section(tab_name, section_name, side, size, offset)
-        local page = resolvePage(grp.name, tab_name)
-        local targetCol = (side == 1) and page.left or page.right
-
-        local secHead = mk("Frame", {
-            Name = "Sec_" .. section_name,
+        local nameLbl = lbl(card, name, 22, COL.textOff, UDim2.fromOffset(20, 0), UDim2.fromOffset(W - 140, 70), { name = "Name" })
+        local hit = mk("TextButton", {
+            Name = "Hit",
+            Text = "",
+            AutoButtonColor = false,
             BackgroundTransparency = 1,
-            Size = UDim2.fromOffset(410, 28),
-        }, targetCol)
-        lbl(secHead, section_name:upper(), 14, COL.hint, UDim2.fromOffset(12, 0), UDim2.fromOffset(380, 28), { bold = true })
-        local ul = mk("Frame", {
-            BackgroundColor3 = accentColor(),
-            BorderSizePixel = 0,
-            Position = UDim2.fromOffset(12, 26),
-            Size = UDim2.fromOffset(40, 2),
-        }, secHead)
-        onAccent(function(c) ul.BackgroundColor3 = c end)
+            Size = UDim2.fromOffset(W - 120, 70),
+            ZIndex = 2,
+        }, card)
 
-        local secObj = {
-            name = section_name,
-            elements = {},
-            col = targetCol,
+        local hasArrow = opts.arrow and true or false
+        local boxW = hasArrow and 108 or 56
+        local box = mk("Frame", {
+            Name = "Box",
+            BackgroundColor3 = COL.box,
+            BorderSizePixel = 0,
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.fromOffset(W - 12, 35),
+            Size = UDim2.fromOffset(boxW, 40),
+            ZIndex = 3,
+        }, card)
+        corner(box, 14, true)
+        glassify(box, 0.5)
+
+        local sw
+        sw = makeSwitch(box, UDim2.fromOffset(9, 10), opts.default, function(on)
+            tw(nameLbl, 0.18, { TextColor3 = on and COL.textOn or COL.textOff })
+            if opts.onChange then opts.onChange(on) end
+        end)
+        if opts.default then nameLbl.TextColor3 = COL.textOn end
+
+        hit.Activated:Connect(function()
+            sw.Toggle()
+            setDesc(opts.desc)
+        end)
+
+        local settingsFrame = nil
+        local extraHeight = 0
+        local expanded = false
+        local chevBtn = nil
+        local sepLine = nil
+
+        local function setupExpandableUI()
+            if chevBtn then return end
+            box.Size = UDim2.fromOffset(108, 40)
+            sepLine = mk("Frame", {
+                Name = "Sep",
+                BackgroundColor3 = COL.line,
+                BorderSizePixel = 0,
+                Position = UDim2.fromOffset(56, 8),
+                Size = UDim2.fromOffset(1, 24),
+            }, box)
+
+            -- Prominent enlarged chevron (26x26)
+            chevBtn = mk("ImageButton", {
+                Name = "Chevron",
+                AutoButtonColor = false,
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromOffset(84, 20),
+                Size = UDim2.fromOffset(26, 26),
+                ImageColor3 = Color3.fromRGB(150, 150, 150),
+            }, box)
+            applyIcon(chevBtn, "chevron-down")
+
+            chevBtn.MouseEnter:Connect(function()
+                tw(chevBtn, 0.15, { ImageColor3 = Color3.fromRGB(240, 240, 240) })
+            end)
+            chevBtn.MouseLeave:Connect(function()
+                tw(chevBtn, 0.15, { ImageColor3 = expanded and accentColor() or Color3.fromRGB(150, 150, 150) })
+            end)
+
+            settingsFrame = mk("Frame", {
+                Name = "Settings",
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(0, 70),
+                Size = UDim2.fromOffset(W, extraHeight),
+            }, card)
+            mk("UIListLayout", {
+                Padding = UDim.new(0, 6),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center,
+            }, settingsFrame)
+
+            chevBtn.Activated:Connect(function()
+                expanded = not expanded
+                tw(chevBtn, 0.22, { Rotation = expanded and 180 or 0, ImageColor3 = expanded and accentColor() or Color3.fromRGB(150, 150, 150) })
+                tw(card, 0.25, { Size = UDim2.fromOffset(W, expanded and (70 + extraHeight) or 70) })
+                setDesc(opts.desc)
+            end)
+        end
+
+        if hasArrow then setupExpandableUI() end
+
+        local cardApi = {
+            card = card,
+            box = box,
+            sw = sw,
+            nameLbl = nameLbl,
         }
 
-        function secObj:create_element(info, properties)
-            properties = properties or {}
-            local elName = info.name or info.text or "element"
+        function cardApi.enableSettings()
+            setupExpandableUI()
+        end
 
-            local elObj = {
-                name = elName,
-                visible = true,
-                on_toggle_change = signal["new"](),
-                on_slider_change = signal["new"](),
-                on_dropdown_change = signal["new"](),
-                on_color_change = signal["new"](),
-                on_clicked = signal["new"](),
-                sub_elements = {},
-            }
-            registered_elements[#registered_elements + 1] = elObj
-            secObj.elements[#secObj.elements + 1] = elObj
+        function cardApi.addSettingRow(type, name, props)
+            setupExpandableUI()
+            local rowW = W - 20
+            extraHeight = extraHeight + 52
+            settingsFrame.Size = UDim2.fromOffset(W, extraHeight)
+            if expanded then
+                card.Size = UDim2.fromOffset(W, 70 + extraHeight)
+            end
 
-            if properties.toggle then
-                local p = properties.toggle
-                elObj.toggle_flag = p.flag
-                flags[p.flag] = p.default and true or false
+            local row = mk("Frame", {
+                Name = name,
+                BackgroundColor3 = COL.box,
+                BorderSizePixel = 0,
+                Size = UDim2.fromOffset(rowW, 46),
+            }, settingsFrame)
+            corner(row, 14, true)
+            glassify(row, 0.5)
+            lbl(row, name, 17, COL.textOff, UDim2.fromOffset(16, 0), UDim2.fromOffset(120, 46))
 
-                local cardHandle = makeCard(targetCol, elName, {
-                    default = flags[p.flag],
-                    desc = info.desc or elName,
-                    onChange = function(val)
-                        flags[p.flag] = val
-                        elObj.on_toggle_change:Fire(val)
-                    end,
-                })
-                elObj.cardHandle = cardHandle
-
-                function elObj:set_toggle(val)
-                    flags[p.flag] = val and true or false
-                    cardHandle.sw.Set(flags[p.flag], true)
-                    elObj.on_toggle_change:Fire(flags[p.flag])
-                end
-
-                function elObj:create_settings(count)
-                    cardHandle.enableSettings()
-                    local setObj = { elements = {} }
-                    function setObj:create_element(sInfo, sProps)
-                        sProps = sProps or {}
-                        local sName = sInfo.name or sInfo.text or "sub"
-                        local subEl = {
-                            name = sName,
-                            on_toggle_change = signal["new"](),
-                            on_slider_change = signal["new"](),
-                            on_dropdown_change = signal["new"](),
-                            on_color_change = signal["new"](),
-                            on_clicked = signal["new"](),
-                        }
-                        registered_elements[#registered_elements + 1] = subEl
-
-                        if sProps.slider then
-                            local sp = sProps.slider
-                            subEl.slider_flag = sp.flag
-                            flags[sp.flag] = sp.default or sp.min or 0
-                            local sl = cardHandle.addSettingRow("slider", sName, {
-                                min = sp.min or 0,
-                                max = sp.max or 100,
-                                default = flags[sp.flag],
-                                step = sp.step or (sp.decimals and 10^(-sp.decimals)) or 1,
-                                onChange = function(v)
-                                    flags[sp.flag] = v
-                                    subEl.on_slider_change:Fire(v)
-                                end,
-                            })
-                            function subEl:set_slider(v)
-                                flags[sp.flag] = v
-                                if sl then sl.Set(v, true) end
-                                subEl.on_slider_change:Fire(v)
-                            end
-                        elseif sProps.toggle then
-                            local tp = sProps.toggle
-                            subEl.toggle_flag = tp.flag
-                            flags[tp.flag] = tp.default and true or false
-                            local tsw = cardHandle.addSettingRow("toggle", sName, {
-                                default = flags[tp.flag],
-                                onChange = function(v)
-                                    flags[tp.flag] = v
-                                    subEl.on_toggle_change:Fire(v)
-                                end,
-                            })
-                            function subEl:set_toggle(v)
-                                flags[tp.flag] = v and true or false
-                                if tsw then tsw.Set(v, true) end
-                                subEl.on_toggle_change:Fire(flags[tp.flag])
-                            end
-                        elseif sProps.dropdown then
-                            local dp = sProps.dropdown
-                            subEl.dropdown_flag = dp.flag
-                            flags[dp.flag] = dp.default or (dp.options and dp.options[1]) or ""
-                            local dd = cardHandle.addSettingRow("dropdown", sName, {
-                                options = dp.options or {},
-                                default = flags[dp.flag],
-                                multi = dp.multi,
-                                onChange = function(v)
-                                    flags[dp.flag] = v
-                                    subEl.on_dropdown_change:Fire(v)
-                                end,
-                            })
-                            function subEl:set_dropdown(v)
-                                flags[dp.flag] = v
-                                if dd then dd.Set(v, true) end
-                                subEl.on_dropdown_change:Fire(v)
-                            end
-                        elseif sProps.colorpicker then
-                            local cp = sProps.colorpicker
-                            subEl.color_flag = cp.flag
-                            subEl.transparency_flag = cp.transparency_flag
-                            flags[cp.flag] = cp.default or Color3.new(1, 1, 1)
-                            if cp.transparency_flag then
-                                flags[cp.transparency_flag] = cp.default_transparency or 0
-                            end
-                            local colPick = cardHandle.addSettingRow("colorpicker", sName, {
-                                default = flags[cp.flag],
-                                defaultAlpha = cp.transparency_flag and flags[cp.transparency_flag] or 0,
-                                onChange = function(c, a)
-                                    flags[cp.flag] = c
-                                    if cp.transparency_flag then flags[cp.transparency_flag] = a end
-                                    subEl.on_color_change:Fire(c)
-                                end,
-                            })
-                            function subEl:set_colorpicker(c)
-                                flags[cp.flag] = c
-                                if colPick then colPick.Set(c, nil, true) end
-                                subEl.on_color_change:Fire(c)
-                            end
-                            function subEl:set_colorpicker_transparency(a)
-                                if cp.transparency_flag then flags[cp.transparency_flag] = a end
-                                if colPick then colPick.Set(nil, a, true) end
-                            end
-                        elseif sProps.keybind then
-                            local kp = sProps.keybind
-                            subEl.keybind_flag = kp.flag
-                            flags[kp.flag] = kp.default or Enum.KeyCode.Unknown
-                            local kb = cardHandle.addSettingRow("keybind", sName, {
-                                default = flags[kp.flag],
-                                onChange = function(k)
-                                    flags[kp.flag] = k
-                                end,
-                            })
-                            function subEl:set_key(k)
-                                flags[kp.flag] = k
-                                if kb then kb.Set(k, true) end
-                            end
-                        elseif sProps.textbox then
-                            local tbp = sProps.textbox
-                            subEl.textbox_flag = tbp.flag
-                            flags[tbp.flag] = tbp.default or ""
-                            local tb = cardHandle.addSettingRow("textbox", sName, {
-                                default = flags[tbp.flag],
-                                placeholder = tbp.placeholder,
-                                onChange = function(t)
-                                    flags[tbp.flag] = t
-                                end,
-                            })
-                            function subEl:set_textbox(t)
-                                flags[tbp.flag] = t
-                                if tb then tb.Set(t, true) end
-                            end
-                        elseif sProps.button then
-                            local bp = sProps.button
-                            cardHandle.addSettingRow("button", sName, {
-                                confirmation = bp.confirmation,
-                                onClick = function()
-                                    subEl.on_clicked:Fire()
-                                    if bp.callback then bp.callback() end
-                                end,
-                            })
-                        end
-
-                        function subEl:set_visible(v) end
-                        return subEl
-                    end
-                    return setObj
-                end
-
-            elseif properties.slider then
-                local sp = properties.slider
-                elObj.slider_flag = sp.flag
-                flags[sp.flag] = sp.default or sp.min or 0
-
-                local card = mk("Frame", {
-                    Name = elName,
-                    BackgroundColor3 = COL.card,
-                    BorderSizePixel = 0,
-                    Size = UDim2.fromOffset(410, 70),
-                }, targetCol)
-                corner(card, 22, true)
-                glassify(card, 1)
-                lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(150, 70))
-                local val = lbl(card, tostring(flags[sp.flag]), 16, COL.value, UDim2.fromOffset(340, 0), UDim2.fromOffset(50, 70), { align = Enum.TextXAlignment.Right })
-                local sl = makeSlider(card, 180, 35, 150, sp.min or 0, sp.max or 100, flags[sp.flag], sp.step or 1, function(v)
-                    val.Text = string.format("%.1f", v)
-                    flags[sp.flag] = v
-                    elObj.on_slider_change:Fire(v)
+            if type == "slider" then
+                local val = lbl(row, "", 16, COL.value, UDim2.fromOffset(rowW - 72, 0), UDim2.fromOffset(56, 46), { align = Enum.TextXAlignment.Right })
+                local function fmt(v) return string.format("%.1f", v) end
+                local sl = makeSlider(row, 140, 23, rowW - 140 - 80, props.min or 0, props.max or 100, props.default or 0, props.step or 1, function(v)
+                    val.Text = fmt(v)
+                    if props.onChange then props.onChange(v) end
                 end, COL.box)
+                val.Text = fmt(props.default or 0)
+                return sl
+            elseif type == "toggle" then
+                local rsw = makeSwitch(row, UDim2.fromOffset(rowW - 16 - 38, 13), props.default, props.onChange)
+                return rsw
+            elseif type == "dropdown" then
+                local dd = makeDropdown(row, UDim2.fromOffset(rowW - 16 - 150, 5), 150, props.options or {}, props.default, props.multi, props.onChange)
+                return dd
+            elseif type == "colorpicker" then
+                local cp = makeColorpicker(row, UDim2.fromOffset(rowW - 16 - 36, 11), props.default, props.defaultAlpha, props.onChange)
+                return cp
+            elseif type == "keybind" then
+                local kb = makeKeybind(row, UDim2.fromOffset(rowW - 16 - 80, 9), props.default, props.onChange)
+                return kb
+            elseif type == "textbox" then
+                local tb = makeTextbox(row, UDim2.fromOffset(rowW - 16 - 140, 6), 140, props.default, props.placeholder, props.onChange)
+                return tb
+            elseif type == "button" then
+                local btn = makeButton(row, UDim2.fromOffset(rowW - 16 - 100, 5), 100, name, props.confirmation, props.onClick)
+                return btn
+            end
+        end
 
-                function elObj:set_slider(v)
-                    flags[sp.flag] = v
-                    val.Text = string.format("%.1f", v)
-                    sl.Set(v, true)
-                    elObj.on_slider_change:Fire(v)
-                end
+        return cardApi
+    end
 
-            elseif properties.dropdown then
-                local dp = properties.dropdown
-                elObj.dropdown_flag = dp.flag
-                flags[dp.flag] = dp.default or (dp.options and dp.options[1]) or ""
+    ----------------------------------------------------------------------
+    -- makePanelSection (for Players list, Configs list, Shop items)
+    ----------------------------------------------------------------------
+    local function makePanelSection(parentCol, title, isPlayers, onSelection)
+        local W = 410
+        local panel = mk("Frame", {
+            Name = title,
+            BackgroundColor3 = COL.card,
+            BorderSizePixel = 0,
+            Size = UDim2.fromOffset(W, 430),
+        }, parentCol)
+        corner(panel, 22, true)
+        glassify(panel, 1)
 
-                local card = mk("Frame", {
-                    Name = elName,
-                    BackgroundColor3 = COL.card,
+        local pHead = mk("Frame", {
+            Name = "Header",
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(16, 12),
+            Size = UDim2.fromOffset(W - 32, 42),
+        }, panel)
+
+        local titleLbl = lbl(pHead, title, 20, COL.textOn, UDim2.fromOffset(0, 0), UDim2.fromOffset(120, 42), { bold = true })
+
+        local countBadge = mk("Frame", {
+            Name = "CountBadge",
+            BackgroundColor3 = COL.box,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(125, 10),
+            Size = UDim2.fromOffset(36, 22),
+        }, pHead)
+        pill(countBadge)
+        local countLbl = lbl(countBadge, "0", 13, COL.value, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { align = Enum.TextXAlignment.Center, bold = true })
+
+        local pSearchWrap = mk("Frame", {
+            Name = "SearchWrap",
+            BackgroundColor3 = COL.box,
+            BorderSizePixel = 0,
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, 0, 0.5, 0),
+            Size = UDim2.fromOffset(150, 34),
+        }, pHead)
+        corner(pSearchWrap, 12, true)
+        glassify(pSearchWrap, 0.5)
+
+        local pSearchBox = mk("TextBox", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(10, 0),
+            Size = UDim2.fromOffset(108, 34),
+            Text = "",
+            PlaceholderText = "Search...",
+            PlaceholderColor3 = Color3.fromRGB(96, 96, 96),
+            TextColor3 = Color3.fromRGB(205, 205, 205),
+            TextSize = 14,
+            FontFace = FONT_REG,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+        }, pSearchWrap)
+
+        local pSearchIcon = mk("ImageLabel", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -8, 0.5, 0),
+            Size = UDim2.fromOffset(16, 16),
+            ImageColor3 = Color3.fromRGB(110, 110, 110),
+        }, pSearchWrap)
+        applyIcon(pSearchIcon, "search")
+
+        mk("Frame", {
+            BackgroundColor3 = COL.line,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(16, 60),
+            Size = UDim2.fromOffset(W - 32, 1),
+        }, panel)
+
+        local listScroll = mk("ScrollingFrame", {
+            Name = "List",
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(12, 68),
+            Size = UDim2.fromOffset(W - 24, 350),
+            ScrollBarThickness = 3,
+            ScrollBarImageColor3 = COL.track,
+            CanvasSize = UDim2.new(),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+        }, panel)
+        scrollers[#scrollers + 1] = listScroll
+
+        mk("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, listScroll)
+
+        local items = {}
+        local selectedItem = nil
+        local selSignal = signal["new"]()
+
+        local function updateCount()
+            countLbl.Text = tostring(#items)
+        end
+
+        local function reflowItems()
+            local filter = pSearchBox.Text:lower()
+            for _, it in ipairs(items) do
+                local show = (filter == "") or (it.name:lower():find(filter, 1, true) ~= nil)
+                it.row.Visible = show
+            end
+        end
+        pSearchBox:GetPropertyChangedSignal("Text"):Connect(reflowItems)
+
+        local panelObj = {
+            frame = panel,
+            scroll = listScroll,
+            on_selection_change = selSignal,
+            selected = nil,
+        }
+
+        function panelObj:add_item(info)
+            local name = type(info) == "table" and (info.text or info.name) or tostring(info)
+            for _, it in ipairs(items) do
+                if it.name == name then return it end
+            end
+
+            local row = mk("TextButton", {
+                Name = name,
+                Text = "",
+                AutoButtonColor = false,
+                BackgroundColor3 = COL.box,
+                BorderSizePixel = 0,
+                Size = UDim2.fromOffset(W - 24, 48),
+            }, listScroll)
+            corner(row, 12, true)
+            glassify(row, 0.5)
+
+            local rowStroke = mk("UIStroke", {
+                Color = accentColor(),
+                Thickness = 1.5,
+                Transparency = 1,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            }, row)
+
+            local iconOffset = 10
+            if isPlayers then
+                local targetPlayer = players_service:FindFirstChild(name)
+                local av = mk("ImageLabel", {
+                    Name = "Avatar",
+                    BackgroundColor3 = Color3.fromRGB(30, 30, 30),
                     BorderSizePixel = 0,
-                    Size = UDim2.fromOffset(410, 70),
-                }, targetCol)
-                corner(card, 22, true)
-                glassify(card, 1)
-                lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
+                    Position = UDim2.fromOffset(8, 8),
+                    Size = UDim2.fromOffset(32, 32),
+                    Image = targetPlayer and ("rbxthumb://type=AvatarHeadShot&id=" .. targetPlayer.UserId .. "&w=100&h=100&filters=0") or "",
+                }, row)
+                pill(av)
+                iconOffset = 48
+            else
+                local ic = mk("ImageLabel", {
+                    Name = "Icon",
+                    BackgroundTransparency = 1,
+                    Position = UDim2.fromOffset(12, 14),
+                    Size = UDim2.fromOffset(20, 20),
+                    ImageColor3 = COL.hint,
+                }, row)
+                applyIcon(ic, "file-text")
+                iconOffset = 40
+            end
 
-                local dd = makeDropdown(card, UDim2.fromOffset(230, 17), 168, dp.options or {}, flags[dp.flag], dp.multi, function(v)
-                    flags[dp.flag] = v
-                    elObj.on_dropdown_change:Fire(v)
-                end)
+            local nameLabel = lbl(row, name, 16, COL.textOff, UDim2.fromOffset(iconOffset, 6), UDim2.fromOffset(W - 24 - iconOffset - 80, 20), { bold = true })
+            local subLabel = lbl(row, isPlayers and ("@" .. name) or "Item", 12, COL.hint, UDim2.fromOffset(iconOffset, 26), UDim2.fromOffset(W - 24 - iconOffset - 80, 16))
 
-                function elObj:set_dropdown(v)
-                    flags[dp.flag] = v
-                    dd.Set(v, true)
-                    elObj.on_dropdown_change:Fire(v)
-                end
+            local badge = mk("Frame", {
+                Name = "Badge",
+                BackgroundColor3 = COL.track,
+                BorderSizePixel = 0,
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -12, 0.5, 0),
+                Size = UDim2.fromOffset(60, 22),
+                Visible = false,
+            }, row)
+            pill(badge)
+            local badgeText = lbl(badge, "", 11, COL.textOn, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), { align = Enum.TextXAlignment.Center, bold = true })
 
-            elseif properties.button then
-                local bp = properties.button
-                local card = mk("Frame", {
-                    Name = elName,
-                    BackgroundColor3 = COL.card,
-                    BorderSizePixel = 0,
-                    Size = UDim2.fromOffset(410, 70),
-                }, targetCol)
-                corner(card, 22, true)
-                glassify(card, 1)
-                lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(240, 70))
-                makeButton(card, UDim2.fromOffset(270, 17), 125, "Execute", bp.confirmation, function()
-                    elObj.on_clicked:Fire()
-                    if bp.callback then bp.callback() end
-                end)
+            local itEntry = {
+                name = name,
+                row = row,
+                stroke = rowStroke,
+                nameLabel = nameLabel,
+                subLabel = subLabel,
+                badge = badge,
+                badgeText = badgeText,
+            }
+            items[#items + 1] = itEntry
+            updateCount()
 
-            elseif properties.textbox then
-                local tbp = properties.textbox
-                elObj.textbox_flag = tbp.flag
-                flags[tbp.flag] = tbp.default or ""
-
-                local card = mk("Frame", {
-                    Name = elName,
-                    BackgroundColor3 = COL.card,
-                    BorderSizePixel = 0,
-                    Size = UDim2.fromOffset(410, 70),
-                }, targetCol)
-                corner(card, 22, true)
-                glassify(card, 1)
-                lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
-                local tb = makeTextbox(card, UDim2.fromOffset(220, 18), 178, flags[tbp.flag], tbp.placeholder, function(t)
-                    flags[tbp.flag] = t
-                end)
-                function elObj:set_textbox(t)
-                    flags[tbp.flag] = t
-                    tb.Set(t, true)
-                end
-
-            elseif properties.info then
-                local card = mk("Frame", {
-                    Name = elName,
-                    BackgroundColor3 = COL.card,
-                    BorderSizePixel = 0,
-                    Size = UDim2.fromOffset(410, 70),
-                }, targetCol)
-                corner(card, 22, true)
-                glassify(card, 1)
-                local lTitle = lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
-                local lVal = lbl(card, "", 16, COL.value, UDim2.fromOffset(200, 0), UDim2.fromOffset(190, 70), { align = Enum.TextXAlignment.Right })
-                function elObj:set_info(prop, val)
-                    if prop == "Text" then lVal.Text = tostring(val)
-                    elseif prop == "Color" then lVal.TextColor3 = val end
+            local function setSelected(sel)
+                if sel then
+                    if selectedItem and selectedItem ~= itEntry then
+                        tw(selectedItem.row, 0.15, { BackgroundColor3 = COL.box })
+                        tw(selectedItem.stroke, 0.15, { Transparency = 1 })
+                        tw(selectedItem.nameLabel, 0.15, { TextColor3 = COL.textOff })
+                    end
+                    selectedItem = itEntry
+                    panelObj.selected = { name = name }
+                    tw(row, 0.15, { BackgroundColor3 = COL.track })
+                    tw(rowStroke, 0.15, { Transparency = 0 })
+                    tw(nameLabel, 0.15, { TextColor3 = COL.textOn })
+                    selSignal:Fire(name)
+                    if onSelection then onSelection(name) end
+                else
+                    tw(row, 0.15, { BackgroundColor3 = COL.box })
+                    tw(rowStroke, 0.15, { Transparency = 1 })
+                    tw(nameLabel, 0.15, { TextColor3 = COL.textOff })
+                    if selectedItem == itEntry then
+                        selectedItem = nil
+                        panelObj.selected = nil
+                        selSignal:Fire(nil)
+                    end
                 end
             end
 
-            function elObj:set_visible(v)
-                if elObj.cardHandle and elObj.cardHandle.card then
-                    elObj.cardHandle.card.Visible = v
+            row.Activated:Connect(function() setSelected(true) end)
+            return itEntry
+        end
+
+        function panelObj:remove_item(text)
+            for i = #items, 1, -1 do
+                if items[i].name == text then
+                    local it = items[i]
+                    table.remove(items, i)
+                    if selectedItem == it then
+                        selectedItem = nil
+                        panelObj.selected = nil
+                    end
+                    tw(it.row, 0.18, { Size = UDim2.fromOffset(W - 24, 0), BackgroundTransparency = 1 })
+                    task.delay(0.2, function() it.row:Destroy() end)
+                    updateCount()
+                    break
                 end
             end
-
-            return elObj
         end
 
-        function secObj:recalculate_size() end
-        function secObj:destroy() end
-        return secObj
+        function panelObj:select_item(text)
+            for _, it in ipairs(items) do
+                if it.name == text then
+                    panelObj:add_item(text)
+                    it.row.Activated:Fire()
+                    break
+                end
+            end
+        end
+
+        function panelObj:edit_item_color(text, color)
+            for _, it in ipairs(items) do
+                if it.name == text then
+                    it.badge.Visible = true
+                    it.badge.BackgroundColor3 = color
+                    break
+                end
+            end
+        end
+
+        function panelObj:add_icon(text, icon)
+            for _, it in ipairs(items) do
+                if it.name == text then
+                    it.badge.Visible = true
+                    it.badgeText.Text = tostring(icon)
+                    break
+                end
+            end
+        end
+
+        function panelObj:remove_icon(text, icon)
+            for _, it in ipairs(items) do
+                if it.name == text then
+                    it.badge.Visible = false
+                    break
+                end
+            end
+        end
+
+        function panelObj:update_position() end
+
+        return panelObj
     end
 
-    function grp:create_panel_section(tab_name, section_name, side, favorites, configs)
-        local page = resolvePage(grp.name, tab_name)
-        local targetCol = (side == 1) and page.left or page.right
-        local isPlayers = (tab_name == "players")
-        local pnl = makePanelSection(targetCol, section_name, isPlayers)
-        return pnl
-    end
-
-    menu.groups[name] = grp
-    return grp
-end
-
-----------------------------------------------------------------------
--- Initial Groups, Tabs & Common Elements Setup
-----------------------------------------------------------------------
-do
-    local main = menu.create_group("main")
-    main:create_tab("ragebot")
-    main:create_tab("legitbot")
-
-    local visuals = menu.create_group("visuals")
-    visuals:create_tab("players")
-    visuals:create_tab("general")
-    visuals:create_tab("skins")
-
-    local misc = menu.create_group("misc.")
-    misc:create_tab("players")
-    misc:create_tab("configs")
-    misc:create_tab("addons")
-    misc:create_tab("shop")
-    misc:create_tab("main")
-
-    menu.create_group("addons")
-
-    -- Addon list & panel
-    menu_references["addon_list"] = menu.groups["misc."]:create_panel_section("addons", "addon list", 1, 1, 0)
-    menu_references["addon_panel"] = menu.groups["misc."]:create_section("addons", "addon panel", 2, 1, 0)
-
-    menu_references["load_addon"] = menu_references["addon_panel"]:create_element({ name = "load addon" }, { button = { fake = true } })
-    menu_references["unload_addon"] = menu_references["addon_panel"]:create_element({ name = "unload addon" }, { button = { fake = true } })
-    menu_references["refresh_addon_list"] = menu_references["addon_panel"]:create_element({ name = "refresh addon list" }, { button = { fake = true } })
-
-    -- Configs
-    local config_list = menu.groups["misc."]:create_panel_section("configs", "config list", 1, false, true)
-    local config_info = menu.groups["misc."]:create_section("configs", "config info", 2, 0.3, 0)
-    local config_editor = menu.groups["misc."]:create_section("configs", "config editor", 2, 0.7, 0.3)
-
-    menu_references["config_list"] = config_list
-
-    local config_author = config_info:create_element({ name = "creator: " }, { info = {} })
-    local config_last_updated = config_info:create_element({ name = "last updated: " }, { info = {} })
-
-    local config_name = config_editor:create_element({ name = "config name" }, { textbox = { flag = "!config_name" } })
-    local create_config = config_editor:create_element({ name = "create config" }, { button = { fake = true } })
-    local delete_config = config_editor:create_element({ name = "delete config" }, { button = { confirmation = true, fake = true } })
-    local update_config = config_editor:create_element({ name = "update config" }, { button = { confirmation = true, fake = true } })
-    local load_config = config_editor:create_element({ name = "load config" }, { button = { confirmation = true, fake = true } })
-    local refresh_config_list = config_editor:create_element({ name = "refresh config list" }, { button = { fake = true } })
-
-    local function refreshConfigs()
-        local list = menu.get_config_list()
-        for _, it in ipairs(list) do
-            config_list:add_item(it)
-        end
-    end
-    refreshConfigs()
-
-    create_connection(refresh_config_list.on_clicked, refreshConfigs)
-    create_connection(create_config.on_clicked, function()
-        local name = flags["!config_name"]
-        if name and name ~= "" then
-            menu.save_config(name)
-            refreshConfigs()
-        end
-    end)
-
-    create_connection(config_list.on_selection_change, function(config)
-        if config then
-            config_author:set_info("Text", "Config: " .. config)
-            config_last_updated:set_info("Text", os.date("%x"))
-        end
-    end)
-
-    create_connection(load_config.on_clicked, function()
-        if config_list.selected and config_list.selected.name then
-            menu.load_config(config_list.selected.name)
-        end
-    end)
-
-    create_connection(update_config.on_clicked, function()
-        if config_list.selected and config_list.selected.name then
-            menu.save_config(config_list.selected.name)
-        end
-    end)
-
-    create_connection(delete_config.on_clicked, function()
-        if config_list.selected and config_list.selected.name then
-            local path = "juju recode/configs/" .. config_list.selected.name .. ".cfg"
-            if isfile(path) then delfile(path) end
-            config_list:remove_item(config_list.selected.name)
-            menu.new_notification("deleted config " .. config_list.selected.name, 2)
-        end
-    end)
-
-    -- Settings toggles
-    local settingsSec = tabPages["settings"].page.left
-    menu_references["notifications"] = {
-        set_toggle = function(self, val)
-            flags["!notifications"] = val
-        end,
-        on_toggle_change = signal["new"](),
+    ----------------------------------------------------------------------
+    -- Tabs definition & page containers
+    ----------------------------------------------------------------------
+    local TAB_DEFS = {
+        { id = "ragebot", name = "Ragebot", icon = "crosshair", y = 170, hint = "Ragebot targeting, hitboxes & desync" },
+        { id = "legitbot", name = "Legitbot", icon = "target", y = 230, hint = "Legit aim assist, silent aim & triggerbot" },
+        { id = "visuals", name = "Visuals", icon = "eye", y = 290, hint = "World visuals, lighting & hud modifications" },
+        { id = "esp", name = "Player ESP", icon = "user-check", y = 350, hint = "Player ESP boxes, tracers, health & chams" },
+        { id = "skins", name = "Skins", icon = "sparkles", y = 410, hint = "Skin changer and custom textures" },
+        { id = "movement", name = "Movement", icon = "chevrons-right", y = 470, hint = "Speed, fly, anti-slow & movement physics" },
+        { id = "players", name = "Players", icon = "users", y = 530, hint = "Player list, statuses, telemetry & interactions" },
+        { id = "shop", name = "Shop", icon = "shopping-bag", y = 590, hint = "Da Hood automated shop & ammo buyer" },
+        { id = "configs", name = "Configs", icon = "folder", y = 650, hint = "Config manager, profiles & addons" },
+        { id = "settings", name = "Settings", icon = "sliders", y = 710, hint = "Interface scaling, glass blur, accent & keybinds", settings = true },
     }
-    menu_references["hide_on_load"] = {
-        set_toggle = function(self, val)
-            flags["!hide_on_load"] = val
-            if val then setOpen(false) end
-        end,
-        on_toggle_change = signal["new"](),
+
+    local SECTIONS = {
+        { "COMBAT", 138, 88 },
+        { "VISUALS", 262, 88 },
+        { "MISC", 442, 88 },
+        { "SYSTEM", 622, 88 },
     }
-end
+
+    for _, s in ipairs(SECTIONS) do
+        mk("Frame", { BackgroundColor3 = COL.line, BorderSizePixel = 0, Position = UDim2.fromOffset(25, s[2]), Size = UDim2.fromOffset(14, 1) }, sidebar)
+        lbl(sidebar, s[1], 13, COL.label, UDim2.fromOffset(45, s[2] - 10), UDim2.fromOffset(120, 20), { name = "Section" })
+        mk("Frame", { BackgroundColor3 = COL.line, BorderSizePixel = 0, Position = UDim2.fromOffset(s[3], s[2]), Size = UDim2.fromOffset(290 - s[3], 1) }, sidebar)
+    end
+
+    local tabPages = {}
+    local currentTab = nil
+
+    local function newColumn(scroll, x, w)
+        local col = mk("Frame", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(x, 0),
+            Size = UDim2.fromOffset(w, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+        }, scroll)
+        mk("UIListLayout", { Padding = UDim.new(0, 16), SortOrder = Enum.SortOrder.LayoutOrder }, col)
+        mk("Frame", { Name = "Pad", LayoutOrder = 9999, BackgroundTransparency = 1, Size = UDim2.fromOffset(w, 8) }, col)
+        return col
+    end
+
+    local function selectTab(def)
+        if currentTab == def then return end
+        currentTab = def
+        for _, d in ipairs(TAB_DEFS) do
+            local on = d == def
+            tw(d.btn, 0.2, { BackgroundTransparency = on and 0 or 1 })
+            tw(d.txt, 0.2, { TextColor3 = on and COL.textOn or COL.tabOff })
+            tw(d.ico, 0.2, { ImageColor3 = on and accentColor() or COL.tabOff })
+            d.page.scroll.Visible = on
+        end
+        searchBox.Text = ""
+        setDesc(def.hint)
+    end
+
+    for _, def in ipairs(TAB_DEFS) do
+        local scroll = mk("ScrollingFrame", {
+            Name = def.name,
+            Active = true,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ScrollBarThickness = 2,
+            ScrollBarImageColor3 = COL.track,
+            CanvasSize = UDim2.new(),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            Size = UDim2.fromOffset(830, 705),
+            Visible = false,
+        }, content)
+        scrollers[#scrollers + 1] = scroll
+
+        local page = { scroll = scroll, cards = {} }
+        page.left = newColumn(scroll, 0, 410)
+        page.right = newColumn(scroll, 420, 410)
+        def.page = page
+        tabPages[def.id] = def
+
+        local btn = mk("TextButton", {
+            Name = def.name,
+            Text = "",
+            AutoButtonColor = false,
+            BackgroundColor3 = COL.tabSel,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(24, def.y - 25),
+            Size = UDim2.fromOffset(286, 48),
+        }, sidebar)
+        corner(btn, 14, true)
+        def.btn = btn
+        def.txt = lbl(btn, def.name, 18, COL.tabOff, UDim2.fromOffset(21, 0), UDim2.fromOffset(180, 48), { name = "Text" })
+        def.ico = mk("ImageLabel", {
+            Name = "Icon",
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(252, 14),
+            Size = UDim2.fromOffset(20, 20),
+            ImageColor3 = COL.tabOff,
+        }, btn)
+        applyIcon(def.ico, def.icon)
+        btn.Activated:Connect(function() selectTab(def) end)
+    end
+
+    ----------------------------------------------------------------------
+    -- global scale & appearance
+    ----------------------------------------------------------------------
+    local function applyScale()
+        local vp = gui.AbsoluteSize
+        if vp.X <= 0 or vp.Y <= 0 then return end
+        uiScale.Scale = math.min(vp.X * 0.9 / WIN_W, vp.Y * 0.9 / WIN_H) * CFG.Scale
+    end
+
+    local function applyGlass()
+        for _, g in ipairs(glass) do
+            g[1].BackgroundTransparency = math.clamp(CFG.Transparency * g[2], 0, 1)
+        end
+        shadow.Visible = CFG.Transparency < 0.05
+    end
+
+    local function applyCorners()
+        for _, c in ipairs(corners) do
+            c[1].CornerRadius = UDim.new(0, math.floor(CFG.Rounding * c[2] + 0.5))
+        end
+    end
+
+    local function applyAccent()
+        local c = accentColor()
+        for _, fn in ipairs(accentHooks) do fn(c) end
+        if currentTab then currentTab.ico.ImageColor3 = c end
+    end
+
+    local function applyBlur()
+        blurFx.Size = holder.Visible and CFG.Blur or 0
+    end
+
+    local function buildSettingsTab()
+        local page = tabPages["settings"].page
+        local col = page.left
+
+        local function addSliderCard(name, min, max, def, step, fmt, onChange)
+            local card = mk("Frame", {
+                Name = name,
+                BackgroundColor3 = COL.card,
+                BorderSizePixel = 0,
+                Size = UDim2.fromOffset(410, 70),
+            }, col)
+            corner(card, 22, true)
+            glassify(card, 1)
+            lbl(card, name, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(150, 70))
+            local val = lbl(card, fmt(def), 16, COL.value, UDim2.fromOffset(340, 0), UDim2.fromOffset(50, 70), { align = Enum.TextXAlignment.Right })
+            makeSlider(card, 180, 35, 150, min, max, def, step, function(v)
+                val.Text = fmt(v)
+                onChange(v)
+            end, COL.box)
+        end
+
+        addSliderCard("Scale", 60, 110, 100, 1, function(v) return v .. "%" end, function(v)
+            CFG.Scale = v / 100
+            applyScale()
+        end)
+        addSliderCard("Transparency", 0, 85, 0, 1, function(v) return v .. "%" end, function(v)
+            CFG.Transparency = v / 100
+            applyGlass()
+        end)
+        addSliderCard("Blur", 0, 40, 0, 1, function(v) return tostring(v) end, function(v)
+            CFG.Blur = v
+            applyBlur()
+        end)
+        addSliderCard("Rounding", 12, 40, 30, 1, function(v) return v .. "px" end, function(v)
+            CFG.Rounding = v
+            applyCorners()
+        end)
+        addSliderCard("Accent Hue", 0, 360, 263, 1, function(v) return v .. "°" end, function(v)
+            CFG.Hue = v / 360
+            applyAccent()
+        end)
+
+        makeCard(page.right, "Animations", {
+            default = true,
+            desc = "Smooth interface tween animations",
+            onChange = function(on) CFG.Animations = on end,
+        })
+    end
+
+    buildSettingsTab()
+
+    ----------------------------------------------------------------------
+    -- drag window & toggle button
+    ----------------------------------------------------------------------
+    do
+        local dragging, origin, startCenter = false, nil, nil
+        header.InputBegan:Connect(function(i)
+            if isPress(i) then
+                dragging = true
+                origin = Vector2.new(i.Position.X, i.Position.Y)
+                startCenter = holder.AbsolutePosition + holder.AbsoluteSize / 2
+            end
+        end)
+        connect(user_input_service.InputChanged, function(i)
+            if dragging and isMove(i) then
+                local c = startCenter + (Vector2.new(i.Position.X, i.Position.Y) - origin)
+                local vp = gui.AbsoluteSize
+                holder.Position = UDim2.fromScale(math.clamp(c.X / vp.X, 0.05, 0.95), math.clamp(c.Y / vp.Y, 0.05, 0.95))
+            end
+        end)
+        connect(user_input_service.InputEnded, function(i)
+            if dragging and isPress(i) then dragging = false end
+        end)
+    end
+
+    local function setOpen(v)
+        holder.Visible = v
+        applyBlur()
+    end
+
+    local fab = mk("ImageButton", {
+        Name = "OpenButton",
+        AutoButtonColor = false,
+        BackgroundColor3 = COL.window,
+        BorderSizePixel = 0,
+        AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(0.5, 0, 0, 10),
+        Size = UDim2.fromOffset(40, 40),
+    }, gui)
+    corner(fab, 14)
+    do
+        local ic = mk("ImageLabel", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(20, 20),
+        }, fab)
+        applyIcon(ic, "menu")
+        onAccent(function(c) ic.ImageColor3 = c end)
+    end
+    fab.Activated:Connect(function() setOpen(not holder.Visible) end)
+
+    connect(user_input_service.InputBegan, function(i, gp)
+        if not gp and i.KeyCode == OPTIONS.ToggleKey then
+            setOpen(not holder.Visible)
+        end
+    end)
+
+    connect(gui:GetPropertyChangedSignal("AbsoluteSize"), applyScale)
+    applyScale()
+    applyGlass()
+    applyCorners()
+    selectTab(TAB_DEFS[1])
+
+    ----------------------------------------------------------------------
+    -- File system & config encryption
+    ----------------------------------------------------------------------
+    if not isfolder("juju recode") then makefolder("juju recode") end
+    if not isfolder("juju recode/configs") then makefolder("juju recode/configs") end
+    if not isfolder("juju recode/addons") then makefolder("juju recode/addons") end
+    if not isfolder("juju recode/custom") then makefolder("juju recode/custom") end
+    if not isfolder("juju recode/themes") then makefolder("juju recode/themes") end
+
+    local function to_base64(input)
+        local charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        local encoded = ""
+        local padding = 0
+        local rem = #input % 3
+        if rem > 0 then
+            for _ = 1, 3 - rem do
+                input = input .. "\0"
+                padding = padding + 1
+            end
+        end
+        for i = 1, #input, 3 do
+            local a, b, c = string.byte(input, i, i + 2)
+            local n = a * 65536 + (b or 0) * 256 + (c or 0)
+            encoded = encoded .. string.sub(charset, math.floor(n / 262144) % 64 + 1, math.floor(n / 262144) % 64 + 1)
+            encoded = encoded .. string.sub(charset, math.floor(n / 4096) % 64 + 1, math.floor(n / 4096) % 64 + 1)
+            encoded = encoded .. string.sub(charset, math.floor(n / 64) % 64 + 1, math.floor(n / 64) % 64 + 1)
+            encoded = encoded .. string.sub(charset, n % 64 + 1, n % 64 + 1)
+        end
+        return string.sub(encoded, 1, #encoded - padding) .. string.rep("=", padding)
+    end
+
+    local function from_base64(input)
+        local charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        local decoded = ""
+        input = string.gsub(input, "=", "")
+        for i = 1, #input, 4 do
+            local a = (string.find(charset, string.sub(input, i, i)) or 1) - 1
+            local b = (string.find(charset, string.sub(input, i + 1, i + 1)) or 1) - 1
+            local c = (string.find(charset, string.sub(input, i + 2, i + 2)) or 1) - 1
+            local d = (string.find(charset, string.sub(input, i + 3, i + 3)) or 1) - 1
+            local n = a * 262144 + b * 4096 + c * 64 + d
+            decoded = decoded .. string.char(math.floor(n / 65536) % 256)
+            decoded = decoded .. string.char(math.floor(n / 256) % 256)
+            decoded = decoded .. string.char(n % 256)
+        end
+        return string.gsub(decoded, "%z", "")
+    end
+
+    local function xor_crypt(input, key)
+        local output = {}
+        for i = 1, #input do
+            local key_byte = string.byte(key, (i - 1) % #key + 1)
+            local xored = bit32.bxor(string.byte(input, i), key_byte)
+            table.insert(output, string.char(xored))
+        end
+        return table.concat(output)
+    end
+
+    local function encrypt(input, key)
+        local salt = tostring(math_random(1000, 9999))
+        input = salt .. input .. string.reverse(salt)
+        return to_base64(xor_crypt(input, key))
+    end
+
+    local function decrypt(input, key)
+        local decoded = from_base64(input)
+        local xored = xor_crypt(decoded, key)
+        return string.sub(xored, 5, -5)
+    end
+
+    ----------------------------------------------------------------------
+    -- Juju Menu Object & Adapter
+    ----------------------------------------------------------------------
+    local active_binds = {}
+    local registered_elements = {}
+
+    local menu = {
+        colors = COL,
+        accent = accentColor(),
+        groups = {},
+        notifications = {},
+        on_config_loaded = signal["new"](),
+        settings = {},
+        autoload = nil,
+        did_action = false,
+        theme = "",
+        saved = true,
+    }
+
+    function menu.is_menu_open()
+        return holder.Visible
+    end
+
+    function menu.update_layout() end
+
+    function menu.set_accent_color(color)
+        if typeof(color) == "Color3" then
+            local h, s, v = color:ToHSV()
+            CFG.Hue = h
+            applyAccent()
+        end
+    end
+
+    function menu.new_notification(text, type, time, data)
+        makeToast(text, type, time)
+    end
+
+    function menu.get_config_list()
+        local list = {}
+        local files = listfiles("juju recode/configs/")
+        for _, file in ipairs(files) do
+            if file:match("%.cfg$") then
+                local fname = file:match("([^/\\]+)%.cfg$")
+                if fname then list[#list + 1] = fname end
+            end
+        end
+        return list
+    end
+
+    function menu.get_addon_list()
+        local list = {}
+        local files = listfiles("juju recode/addons/")
+        for _, file in ipairs(files) do
+            if file:match("%.luau$") then
+                local fname = file:match("([^/\\]+)%.luau$")
+                if fname then list[#list + 1] = fname end
+            end
+        end
+        return list
+    end
+
+    function menu.get_skins_list()
+        local list = {}
+        local files = listfiles("juju recode/custom/")
+        for _, file in ipairs(files) do
+            if file:match("%.skin$") then
+                local fname = file:match("([^/\\]+)%.skin$")
+                if fname then list[#list + 1] = fname end
+            end
+        end
+        return list
+    end
+
+    function menu.get_theme_list()
+        local list = {}
+        local files = listfiles("juju recode/themes/")
+        for _, file in ipairs(files) do
+            if file:match("%.th$") then
+                local fname = file:match("([^/\\]+)%.th$")
+                if fname then list[#list + 1] = fname end
+            end
+        end
+        return list
+    end
+
+    function menu.save_config(name)
+        if not name or name:find("[/\\%.]") then return end
+        local cfg = {
+            author = flags["author"] or "Idris",
+            date = os.date("%x"),
+        }
+        for flag, val in pairs(flags) do
+            if flag:sub(1, 1) ~= "!" then
+                if typeof(val) == "Color3" then
+                    cfg[flag] = { math.floor(val.R * 255), math.floor(val.G * 255), math.floor(val.B * 255) }
+                elseif typeof(val) == "EnumItem" then
+                    cfg[flag] = val.Name
+                else
+                    cfg[flag] = val
+                end
+            end
+        end
+        writefile("juju recode/configs/" .. name .. ".cfg", encrypt(http_service:JSONEncode(cfg), "^^^^^^^^^^^^^^^^^^^^"))
+        menu.new_notification("saved config " .. name, 1)
+    end
+
+    function menu.get_config_data(data)
+        local ok, decrypted = pcall(decrypt, data, "^^^^^^^^^^^^^^^^^^^^")
+        if ok and decrypted then
+            local ok2, json = pcall(function() return http_service:JSONDecode(decrypted) end)
+            if ok2 then return json end
+        end
+    end
+
+    function menu.load_config(name)
+        if not name or name:find("[/\\%.]") then return end
+        local path = "juju recode/configs/" .. name .. ".cfg"
+        if isfile(path) then
+            local cfg = menu.get_config_data(readfile(path))
+            if cfg then
+                for k, v in pairs(cfg) do
+                    if k ~= "author" and k ~= "date" and k ~= "keybinds" then
+                        if type(v) == "table" and #v == 3 and type(v[1]) == "number" then
+                            flags[k] = Color3.fromRGB(v[1], v[2], v[3])
+                        else
+                            flags[k] = v
+                        end
+                    end
+                end
+                for _, el in ipairs(registered_elements) do
+                    if el.toggle_flag and flags[el.toggle_flag] ~= nil then
+                        el:set_toggle(flags[el.toggle_flag])
+                    end
+                    if el.slider_flag and flags[el.slider_flag] ~= nil then
+                        el:set_slider(flags[el.slider_flag])
+                    end
+                    if el.dropdown_flag and flags[el.dropdown_flag] ~= nil then
+                        el:set_dropdown(flags[el.dropdown_flag], true, true)
+                    end
+                    if el.color_flag and flags[el.color_flag] ~= nil then
+                        el:set_colorpicker(flags[el.color_flag])
+                    end
+                end
+                menu.on_config_loaded:Fire()
+                menu.new_notification("loaded config " .. name, 1)
+            end
+        end
+    end
+
+    function menu.show_bind(keybind, just_visual)
+        active_binds[#active_binds + 1] = keybind
+    end
+
+    function menu.hide_bind(keybind, just_visual)
+        for i = #active_binds, 1, -1 do
+            if active_binds[i] == keybind then
+                table.remove(active_binds, i)
+                break
+            end
+        end
+    end
+
+    function menu.get_active_binds()
+        return active_binds
+    end
+
+    function menu:show_keybinds() end
+    function menu:hide_keybinds() end
+    function menu:load_theme(th) end
+
+    ----------------------------------------------------------------------
+    -- Group / Tab / Section mapping to ToshibaUI
+    ----------------------------------------------------------------------
+    local function resolvePage(group_name, tab_name)
+        group_name = (group_name or ""):lower()
+        tab_name = (tab_name or ""):lower()
+
+        if group_name == "main" then
+            if tab_name == "ragebot" then return tabPages["ragebot"].page end
+            if tab_name == "legitbot" then return tabPages["legitbot"].page end
+        elseif group_name == "visuals" then
+            if tab_name == "general" then return tabPages["visuals"].page end
+            if tab_name == "players" then return tabPages["esp"].page end
+            if tab_name == "skins" then return tabPages["skins"].page end
+        elseif group_name == "misc." or group_name == "misc" then
+            if tab_name == "main" then return tabPages["movement"].page end
+            if tab_name == "players" then return tabPages["players"].page end
+            if tab_name == "shop" then return tabPages["shop"].page end
+            if tab_name == "configs" then return tabPages["configs"].page end
+            if tab_name == "addons" then return tabPages["configs"].page end
+        end
+
+        if tabPages[tab_name] then
+            return tabPages[tab_name].page
+        end
+        return tabPages["configs"].page
+    end
+
+    function menu.create_group(name)
+        local grp = {
+            name = name,
+            tabs = {},
+        }
+
+        function grp:create_tab(tab_name)
+            grp.tabs[tab_name] = {
+                name = tab_name,
+                sections = {},
+            }
+            return grp.tabs[tab_name]
+        end
+
+        function grp:hide() end
+        function grp:show() end
+
+        function grp:create_section(tab_name, section_name, side, size, offset)
+            local page = resolvePage(grp.name, tab_name)
+            local targetCol = (side == 1) and page.left or page.right
+
+            local secHead = mk("Frame", {
+                Name = "Sec_" .. section_name,
+                BackgroundTransparency = 1,
+                Size = UDim2.fromOffset(410, 28),
+            }, targetCol)
+            lbl(secHead, section_name:upper(), 14, COL.hint, UDim2.fromOffset(12, 0), UDim2.fromOffset(380, 28), { bold = true })
+            local ul = mk("Frame", {
+                BackgroundColor3 = accentColor(),
+                BorderSizePixel = 0,
+                Position = UDim2.fromOffset(12, 26),
+                Size = UDim2.fromOffset(40, 2),
+            }, secHead)
+            onAccent(function(c) ul.BackgroundColor3 = c end)
+
+            local secObj = {
+                name = section_name,
+                elements = {},
+                col = targetCol,
+            }
+
+            function secObj:create_element(info, properties)
+                properties = properties or {}
+                local elName = info.name or info.text or "element"
+
+                local elObj = {
+                    name = elName,
+                    visible = true,
+                    on_toggle_change = signal["new"](),
+                    on_slider_change = signal["new"](),
+                    on_dropdown_change = signal["new"](),
+                    on_color_change = signal["new"](),
+                    on_clicked = signal["new"](),
+                    sub_elements = {},
+                }
+                registered_elements[#registered_elements + 1] = elObj
+                secObj.elements[#secObj.elements + 1] = elObj
+
+                if properties.toggle then
+                    local p = properties.toggle
+                    elObj.toggle_flag = p.flag
+                    flags[p.flag] = p.default and true or false
+
+                    local cardHandle = makeCard(targetCol, elName, {
+                        default = flags[p.flag],
+                        desc = info.desc or elName,
+                        onChange = function(val)
+                            flags[p.flag] = val
+                            elObj.on_toggle_change:Fire(val)
+                        end,
+                    })
+                    elObj.cardHandle = cardHandle
+
+                    function elObj:set_toggle(val)
+                        flags[p.flag] = val and true or false
+                        cardHandle.sw.Set(flags[p.flag], true)
+                        elObj.on_toggle_change:Fire(flags[p.flag])
+                    end
+
+                    function elObj:create_settings(count)
+                        cardHandle.enableSettings()
+                        local setObj = { elements = {} }
+                        function setObj:create_element(sInfo, sProps)
+                            sProps = sProps or {}
+                            local sName = sInfo.name or sInfo.text or "sub"
+                            local subEl = {
+                                name = sName,
+                                on_toggle_change = signal["new"](),
+                                on_slider_change = signal["new"](),
+                                on_dropdown_change = signal["new"](),
+                                on_color_change = signal["new"](),
+                                on_clicked = signal["new"](),
+                            }
+                            registered_elements[#registered_elements + 1] = subEl
+
+                            if sProps.slider then
+                                local sp = sProps.slider
+                                subEl.slider_flag = sp.flag
+                                flags[sp.flag] = sp.default or sp.min or 0
+                                local sl = cardHandle.addSettingRow("slider", sName, {
+                                    min = sp.min or 0,
+                                    max = sp.max or 100,
+                                    default = flags[sp.flag],
+                                    step = sp.step or (sp.decimals and 10^(-sp.decimals)) or 1,
+                                    onChange = function(v)
+                                        flags[sp.flag] = v
+                                        subEl.on_slider_change:Fire(v)
+                                    end,
+                                })
+                                function subEl:set_slider(v)
+                                    flags[sp.flag] = v
+                                    if sl then sl.Set(v, true) end
+                                    subEl.on_slider_change:Fire(v)
+                                end
+                            elseif sProps.toggle then
+                                local tp = sProps.toggle
+                                subEl.toggle_flag = tp.flag
+                                flags[tp.flag] = tp.default and true or false
+                                local tsw = cardHandle.addSettingRow("toggle", sName, {
+                                    default = flags[tp.flag],
+                                    onChange = function(v)
+                                        flags[tp.flag] = v
+                                        subEl.on_toggle_change:Fire(v)
+                                    end,
+                                })
+                                function subEl:set_toggle(v)
+                                    flags[tp.flag] = v and true or false
+                                    if tsw then tsw.Set(v, true) end
+                                    subEl.on_toggle_change:Fire(flags[tp.flag])
+                                end
+                            elseif sProps.dropdown then
+                                local dp = sProps.dropdown
+                                subEl.dropdown_flag = dp.flag
+                                flags[dp.flag] = dp.default or (dp.options and dp.options[1]) or ""
+                                local dd = cardHandle.addSettingRow("dropdown", sName, {
+                                    options = dp.options or {},
+                                    default = flags[dp.flag],
+                                    multi = dp.multi,
+                                    onChange = function(v)
+                                        flags[dp.flag] = v
+                                        subEl.on_dropdown_change:Fire(v)
+                                    end,
+                                })
+                                function subEl:set_dropdown(v)
+                                    flags[dp.flag] = v
+                                    if dd then dd.Set(v, true) end
+                                    subEl.on_dropdown_change:Fire(v)
+                                end
+                            elseif sProps.colorpicker then
+                                local cp = sProps.colorpicker
+                                subEl.color_flag = cp.flag
+                                subEl.transparency_flag = cp.transparency_flag
+                                flags[cp.flag] = cp.default or Color3.new(1, 1, 1)
+                                if cp.transparency_flag then
+                                    flags[cp.transparency_flag] = cp.default_transparency or 0
+                                end
+                                local colPick = cardHandle.addSettingRow("colorpicker", sName, {
+                                    default = flags[cp.flag],
+                                    defaultAlpha = cp.transparency_flag and flags[cp.transparency_flag] or 0,
+                                    onChange = function(c, a)
+                                        flags[cp.flag] = c
+                                        if cp.transparency_flag then flags[cp.transparency_flag] = a end
+                                        subEl.on_color_change:Fire(c)
+                                    end,
+                                })
+                                function subEl:set_colorpicker(c)
+                                    flags[cp.flag] = c
+                                    if colPick then colPick.Set(c, nil, true) end
+                                    subEl.on_color_change:Fire(c)
+                                end
+                                function subEl:set_colorpicker_transparency(a)
+                                    if cp.transparency_flag then flags[cp.transparency_flag] = a end
+                                    if colPick then colPick.Set(nil, a, true) end
+                                end
+                            elseif sProps.keybind then
+                                local kp = sProps.keybind
+                                subEl.keybind_flag = kp.flag
+                                flags[kp.flag] = kp.default or Enum.KeyCode.Unknown
+                                local kb = cardHandle.addSettingRow("keybind", sName, {
+                                    default = flags[kp.flag],
+                                    onChange = function(k)
+                                        flags[kp.flag] = k
+                                    end,
+                                })
+                                function subEl:set_key(k)
+                                    flags[kp.flag] = k
+                                    if kb then kb.Set(k, true) end
+                                end
+                            elseif sProps.textbox then
+                                local tbp = sProps.textbox
+                                subEl.textbox_flag = tbp.flag
+                                flags[tbp.flag] = tbp.default or ""
+                                local tb = cardHandle.addSettingRow("textbox", sName, {
+                                    default = flags[tbp.flag],
+                                    placeholder = tbp.placeholder,
+                                    onChange = function(t)
+                                        flags[tbp.flag] = t
+                                    end,
+                                })
+                                function subEl:set_textbox(t)
+                                    flags[tbp.flag] = t
+                                    if tb then tb.Set(t, true) end
+                                end
+                            elseif sProps.button then
+                                local bp = sProps.button
+                                cardHandle.addSettingRow("button", sName, {
+                                    confirmation = bp.confirmation,
+                                    onClick = function()
+                                        subEl.on_clicked:Fire()
+                                        if bp.callback then bp.callback() end
+                                    end,
+                                })
+                            end
+
+                            function subEl:set_visible(v) end
+                            return subEl
+                        end
+                        return setObj
+                    end
+
+                elseif properties.slider then
+                    local sp = properties.slider
+                    elObj.slider_flag = sp.flag
+                    flags[sp.flag] = sp.default or sp.min or 0
+
+                    local card = mk("Frame", {
+                        Name = elName,
+                        BackgroundColor3 = COL.card,
+                        BorderSizePixel = 0,
+                        Size = UDim2.fromOffset(410, 70),
+                    }, targetCol)
+                    corner(card, 22, true)
+                    glassify(card, 1)
+                    lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(150, 70))
+                    local val = lbl(card, tostring(flags[sp.flag]), 16, COL.value, UDim2.fromOffset(340, 0), UDim2.fromOffset(50, 70), { align = Enum.TextXAlignment.Right })
+                    local sl = makeSlider(card, 180, 35, 150, sp.min or 0, sp.max or 100, flags[sp.flag], sp.step or 1, function(v)
+                        val.Text = string.format("%.1f", v)
+                        flags[sp.flag] = v
+                        elObj.on_slider_change:Fire(v)
+                    end, COL.box)
+
+                    function elObj:set_slider(v)
+                        flags[sp.flag] = v
+                        val.Text = string.format("%.1f", v)
+                        sl.Set(v, true)
+                        elObj.on_slider_change:Fire(v)
+                    end
+
+                elseif properties.dropdown then
+                    local dp = properties.dropdown
+                    elObj.dropdown_flag = dp.flag
+                    flags[dp.flag] = dp.default or (dp.options and dp.options[1]) or ""
+
+                    local card = mk("Frame", {
+                        Name = elName,
+                        BackgroundColor3 = COL.card,
+                        BorderSizePixel = 0,
+                        Size = UDim2.fromOffset(410, 70),
+                    }, targetCol)
+                    corner(card, 22, true)
+                    glassify(card, 1)
+                    lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
+
+                    local dd = makeDropdown(card, UDim2.fromOffset(230, 17), 168, dp.options or {}, flags[dp.flag], dp.multi, function(v)
+                        flags[dp.flag] = v
+                        elObj.on_dropdown_change:Fire(v)
+                    end)
+
+                    function elObj:set_dropdown(v)
+                        flags[dp.flag] = v
+                        dd.Set(v, true)
+                        elObj.on_dropdown_change:Fire(v)
+                    end
+
+                elseif properties.button then
+                    local bp = properties.button
+                    local card = mk("Frame", {
+                        Name = elName,
+                        BackgroundColor3 = COL.card,
+                        BorderSizePixel = 0,
+                        Size = UDim2.fromOffset(410, 70),
+                    }, targetCol)
+                    corner(card, 22, true)
+                    glassify(card, 1)
+                    lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(240, 70))
+                    makeButton(card, UDim2.fromOffset(270, 17), 125, "Execute", bp.confirmation, function()
+                        elObj.on_clicked:Fire()
+                        if bp.callback then bp.callback() end
+                    end)
+
+                elseif properties.textbox then
+                    local tbp = properties.textbox
+                    elObj.textbox_flag = tbp.flag
+                    flags[tbp.flag] = tbp.default or ""
+
+                    local card = mk("Frame", {
+                        Name = elName,
+                        BackgroundColor3 = COL.card,
+                        BorderSizePixel = 0,
+                        Size = UDim2.fromOffset(410, 70),
+                    }, targetCol)
+                    corner(card, 22, true)
+                    glassify(card, 1)
+                    lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
+                    local tb = makeTextbox(card, UDim2.fromOffset(220, 18), 178, flags[tbp.flag], tbp.placeholder, function(t)
+                        flags[tbp.flag] = t
+                    end)
+                    function elObj:set_textbox(t)
+                        flags[tbp.flag] = t
+                        tb.Set(t, true)
+                    end
+
+                elseif properties.info then
+                    local card = mk("Frame", {
+                        Name = elName,
+                        BackgroundColor3 = COL.card,
+                        BorderSizePixel = 0,
+                        Size = UDim2.fromOffset(410, 70),
+                    }, targetCol)
+                    corner(card, 22, true)
+                    glassify(card, 1)
+                    local lTitle = lbl(card, elName, 20, COL.textOn, UDim2.fromOffset(20, 0), UDim2.fromOffset(180, 70))
+                    local lVal = lbl(card, "", 16, COL.value, UDim2.fromOffset(200, 0), UDim2.fromOffset(190, 70), { align = Enum.TextXAlignment.Right })
+                    function elObj:set_info(prop, val)
+                        if prop == "Text" then lVal.Text = tostring(val)
+                        elseif prop == "Color" then lVal.TextColor3 = val end
+                    end
+                end
+
+                function elObj:set_visible(v)
+                    if elObj.cardHandle and elObj.cardHandle.card then
+                        elObj.cardHandle.card.Visible = v
+                    end
+                end
+
+                return elObj
+            end
+
+            function secObj:recalculate_size() end
+            function secObj:destroy() end
+            return secObj
+        end
+
+        function grp:create_panel_section(tab_name, section_name, side, favorites, configs)
+            local page = resolvePage(grp.name, tab_name)
+            local targetCol = (side == 1) and page.left or page.right
+            local isPlayers = (tab_name == "players")
+            local pnl = makePanelSection(targetCol, section_name, isPlayers)
+            return pnl
+        end
+
+        menu.groups[name] = grp
+        return grp
+    end
+
+    ----------------------------------------------------------------------
+    -- Initial Groups, Tabs & Common Elements Setup
+    ----------------------------------------------------------------------
+    do
+        local main = menu.create_group("main")
+        main:create_tab("ragebot")
+        main:create_tab("legitbot")
+
+        local visuals = menu.create_group("visuals")
+        visuals:create_tab("players")
+        visuals:create_tab("general")
+        visuals:create_tab("skins")
+
+        local misc = menu.create_group("misc.")
+        misc:create_tab("players")
+        misc:create_tab("configs")
+        misc:create_tab("addons")
+        misc:create_tab("shop")
+        misc:create_tab("main")
+
+        menu.create_group("addons")
+
+        -- Addon list & panel
+        menu_references["addon_list"] = menu.groups["misc."]:create_panel_section("addons", "addon list", 1, 1, 0)
+        menu_references["addon_panel"] = menu.groups["misc."]:create_section("addons", "addon panel", 2, 1, 0)
+
+        menu_references["load_addon"] = menu_references["addon_panel"]:create_element({ name = "load addon" }, { button = { fake = true } })
+        menu_references["unload_addon"] = menu_references["addon_panel"]:create_element({ name = "unload addon" }, { button = { fake = true } })
+        menu_references["refresh_addon_list"] = menu_references["addon_panel"]:create_element({ name = "refresh addon list" }, { button = { fake = true } })
+
+        -- Configs
+        local config_list = menu.groups["misc."]:create_panel_section("configs", "config list", 1, false, true)
+        local config_info = menu.groups["misc."]:create_section("configs", "config info", 2, 0.3, 0)
+        local config_editor = menu.groups["misc."]:create_section("configs", "config editor", 2, 0.7, 0.3)
+
+        menu_references["config_list"] = config_list
+
+        local config_author = config_info:create_element({ name = "creator: " }, { info = {} })
+        local config_last_updated = config_info:create_element({ name = "last updated: " }, { info = {} })
+
+        local config_name = config_editor:create_element({ name = "config name" }, { textbox = { flag = "!config_name" } })
+        local create_config = config_editor:create_element({ name = "create config" }, { button = { fake = true } })
+        local delete_config = config_editor:create_element({ name = "delete config" }, { button = { confirmation = true, fake = true } })
+        local update_config = config_editor:create_element({ name = "update config" }, { button = { confirmation = true, fake = true } })
+        local load_config = config_editor:create_element({ name = "load config" }, { button = { confirmation = true, fake = true } })
+        local refresh_config_list = config_editor:create_element({ name = "refresh config list" }, { button = { fake = true } })
+
+        local function refreshConfigs()
+            local list = menu.get_config_list()
+            for _, it in ipairs(list) do
+                config_list:add_item(it)
+            end
+        end
+        refreshConfigs()
+
+        create_connection(refresh_config_list.on_clicked, refreshConfigs)
+        create_connection(create_config.on_clicked, function()
+            local name = flags["!config_name"]
+            if name and name ~= "" then
+                menu.save_config(name)
+                refreshConfigs()
+            end
+        end)
+
+        create_connection(config_list.on_selection_change, function(config)
+            if config then
+                config_author:set_info("Text", "Config: " .. config)
+                config_last_updated:set_info("Text", os.date("%x"))
+            end
+        end)
+
+        create_connection(load_config.on_clicked, function()
+            if config_list.selected and config_list.selected.name then
+                menu.load_config(config_list.selected.name)
+            end
+        end)
+
+        create_connection(update_config.on_clicked, function()
+            if config_list.selected and config_list.selected.name then
+                menu.save_config(config_list.selected.name)
+            end
+        end)
+
+        create_connection(delete_config.on_clicked, function()
+            if config_list.selected and config_list.selected.name then
+                local path = "juju recode/configs/" .. config_list.selected.name .. ".cfg"
+                if isfile(path) then delfile(path) end
+                config_list:remove_item(config_list.selected.name)
+                menu.new_notification("deleted config " .. config_list.selected.name, 2)
+            end
+        end)
+
+        -- Settings toggles
+        local settingsSec = tabPages["settings"].page.left
+        menu_references["notifications"] = {
+            set_toggle = function(self, val)
+                flags["!notifications"] = val
+            end,
+            on_toggle_change = signal["new"](),
+        }
+        menu_references["hide_on_load"] = {
+            set_toggle = function(self, val)
+                flags["!hide_on_load"] = val
+                if val then setOpen(false) end
+            end,
+            on_toggle_change = signal["new"](),
+        }
+    end
+
+    -- > ( end of toshiba menu adapter )
+    return menu
+end)()
 
 -- > ( end of toshiba menu adapter )
 
